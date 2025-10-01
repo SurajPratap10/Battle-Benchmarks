@@ -5,12 +5,7 @@ import streamlit as st
 import asyncio
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import json
-import time
 from datetime import datetime
-import os
 from typing import Dict, List, Any
 
 # Load environment variables first
@@ -25,7 +20,7 @@ from tts_providers import TTSProviderFactory, TTSRequest
 import visualizations
 from export_utils import ExportManager
 from security import session_manager, secure_api_key_input, create_security_dashboard
-from text_parser import TextParser
+from geolocation import geo_service
 
 # Page configuration
 st.set_page_config(
@@ -48,11 +43,29 @@ if "results" not in st.session_state:
 if "config_valid" not in st.session_state:
     st.session_state.config_valid = False
 
-if "text_parser" not in st.session_state:
-    st.session_state.text_parser = TextParser()
+if "navigate_to" not in st.session_state:
+    st.session_state.navigate_to = None
 
-if "uploaded_samples" not in st.session_state:
-    st.session_state.uploaded_samples = []
+def get_model_name(provider: str) -> str:
+    """Helper function to get model name from config"""
+    return TTS_PROVIDERS.get(provider).model_name if provider in TTS_PROVIDERS else provider
+
+def get_location_display(result: BenchmarkResult = None, country: str = None, city: str = None) -> str:
+    """Helper function to format location display with flag"""
+    if result:
+        country = result.location_country
+        city = result.location_city
+    
+    if not country or country == 'Unknown':
+        return '🌍 Unknown'
+    
+    # Get country flag
+    flag = geo_service.get_country_flag(getattr(result, 'location_country', None) if result else None)
+    
+    # Format location string
+    if city and city != 'Unknown':
+        return f"{flag} {city}, {country}"
+    return f"{flag} {country}"
 
 def check_configuration():
     """Check if API keys are configured"""
@@ -102,18 +115,29 @@ def main():
         st.divider()
         
         # Navigation
+        # Check if there's a navigation request from a button
+        if "navigate_to" in st.session_state and st.session_state.navigate_to:
+            default_page = st.session_state.navigate_to
+            st.session_state.navigate_to = None  # Clear after using
+        else:
+            default_page = "Quick Test"
+        
+        pages = ["Quick Test", "Blind Test", "Batch Benchmark", "Results Analysis", "Leaderboard", "Dataset Management", "Export Results", "Security"]
+        default_index = pages.index(default_page) if default_page in pages else 0
+        
         page = st.selectbox(
             "Navigate to:",
-            ["Quick Test", "Batch Benchmark", "Upload Custom Text", "Results Analysis", "Leaderboard", "Dataset Management", "Export Results", "Security"]
+            pages,
+            index=default_index
         )
     
     # Main content based on selected page
     if page == "Quick Test":
         quick_test_page()
+    elif page == "Blind Test":
+        blind_test_page()
     elif page == "Batch Benchmark":
         batch_benchmark_page()
-    elif page == "Upload Custom Text":
-        upload_custom_text_page()
     elif page == "Results Analysis":
         results_analysis_page()
     elif page == "Leaderboard":
@@ -241,12 +265,6 @@ def run_quick_test(text: str, providers: List[str], voice_options: Dict[str, str
     # Display results
     if results:
         display_quick_test_results(results)
-        
-        # Update ELO ratings if we have multiple successful results
-        successful_results = [r for r in results if r.success]
-        if len(successful_results) >= 2:
-            st.session_state.benchmark_engine.update_elo_ratings(results)
-            st.success("🏆 ELO ratings updated based on performance comparison!")
     else:
         st.error("No successful results to display.")
 
@@ -260,6 +278,8 @@ def display_quick_test_results(results: List[BenchmarkResult]):
     for result in results:
         data.append({
             "Provider": result.provider.title(),
+            "Model": result.model_name,
+            "Location": get_location_display(result),
             "Success": "✅" if result.success else "❌",
             "Latency (ms)": f"{result.latency_ms:.1f}" if result.success else "N/A",
             "File Size (KB)": f"{result.file_size_bytes / 1024:.1f}" if result.success else "N/A",
@@ -296,11 +316,11 @@ def display_quick_test_results(results: List[BenchmarkResult]):
             )
             st.plotly_chart(fig_size, use_container_width=True)
     
-    # Audio playback with voting system
-    st.subheader("🔊 Audio Playback & Voting")
+    # Audio playback
+    st.subheader("🔊 Audio Playback")
     
     if len(successful_results) >= 2:
-        st.markdown("**Listen to both audio samples and vote for the one you prefer:**")
+        st.markdown("**Listen to the audio samples:**")
         
         # Create side-by-side comparison
         cols = st.columns(len(successful_results))
@@ -308,113 +328,317 @@ def display_quick_test_results(results: List[BenchmarkResult]):
         for i, result in enumerate(successful_results):
             with cols[i]:
                 st.markdown(f"**{result.provider.title()}**")
+                st.caption(f"Model: {result.model_name}")
                 
                 if result.audio_data:
                     # Audio player
                     st.audio(result.audio_data, format="audio/mp3")
                     st.caption(f"Latency: {result.latency_ms:.1f}ms")
                     st.caption(f"Size: {result.file_size_bytes/1024:.1f} KB")
-                    
-                    # Voting button
-                    if st.button(f"👍 Vote for {result.provider.title()}", 
-                               key=f"vote_{result.provider}",
-                               type="primary"):
-                        handle_user_vote(successful_results, result.provider)
     
     elif len(successful_results) == 1:
         # Single result - just show audio
         result = successful_results[0]
         st.markdown(f"**{result.provider.title()}**")
+        st.caption(f"Model: {result.model_name}")
         if result.audio_data:
             st.audio(result.audio_data, format="audio/mp3")
-            st.caption(f"{result.provider.title()} - {result.latency_ms:.1f}ms - {result.file_size_bytes/1024:.1f} KB")
+            st.caption(f"Latency: {result.latency_ms:.1f}ms | Size: {result.file_size_bytes/1024:.1f} KB")
 
-def handle_user_vote(results: List[BenchmarkResult], winner_provider: str):
-    """Handle user voting for audio preference"""
+def blind_test_page():
+    """Blind test page for unbiased audio quality comparison"""
     
-    # Import database for vote storage
-    from database import db
+    st.header("🎭 Blind Test")
+    st.markdown("Compare TTS audio quality without knowing which provider generated each sample")
     
-    # Find all providers in this comparison
-    providers = [r.provider for r in results if r.success]
+    # Get configuration status
+    config_status = check_configuration()
     
-    if len(providers) < 2:
-        st.warning("Need at least 2 providers to vote!")
+    if not st.session_state.config_valid:
+        st.warning("Please configure at least one API key in the sidebar first.")
         return
     
-    # Show immediate feedback
-    st.success(f"🏆 **{winner_provider.title()}** wins your vote!")
+    # Get only configured providers
+    configured_providers = [
+        provider_id for provider_id, status in config_status["providers"].items() 
+        if status["configured"]
+    ]
     
-    # Update ELO ratings - winner beats all other providers
-    elo_updates = []
-    for provider in providers:
-        if provider != winner_provider:
-            try:
-                # Get current ratings
-                winner_rating_before = db.get_elo_rating(winner_provider)
-                loser_rating_before = db.get_elo_rating(provider)
-                
-                # Update ratings
-                new_winner_rating, new_loser_rating = db.update_elo_ratings(
-                    winner_provider, provider, k_factor=32
-                )
-                
-                # Calculate changes
-                winner_change = new_winner_rating - winner_rating_before
-                loser_change = new_loser_rating - loser_rating_before
-                
-                elo_updates.append({
-                    'winner': winner_provider,
-                    'loser': provider,
-                    'winner_change': winner_change,
-                    'loser_change': loser_change,
-                    'new_winner_rating': new_winner_rating,
-                    'new_loser_rating': new_loser_rating
-                })
-                
-                # Save the vote in database
-                db.save_user_vote(
-                    winner_provider, 
-                    provider, 
-                    results[0].text[:100] + "..." if len(results[0].text) > 100 else results[0].text,
-                    session_id="streamlit_session"
-                )
-                
-            except Exception as e:
-                st.error(f"Error updating ratings: {e}")
+    if len(configured_providers) < 2:
+        st.warning("⚠️ Blind test requires at least 2 configured providers. Please configure more API keys.")
+        return
     
-    # Show ELO updates
-    if elo_updates:
-        st.markdown("### 📈 ELO Rating Changes")
-        for update in elo_updates:
-            winner_change_str = f"+{update['winner_change']:.1f}" if update['winner_change'] > 0 else f"{update['winner_change']:.1f}"
-            loser_change_str = f"+{update['loser_change']:.1f}" if update['loser_change'] > 0 else f"{update['loser_change']:.1f}"
-            
-            st.info(f"📊 {update['winner'].title()}: {winner_change_str} → {update['new_winner_rating']:.1f} ELO")
-            st.info(f"📊 {update['loser'].title()}: {loser_change_str} → {update['new_loser_rating']:.1f} ELO")
+    # Initialize blind test state
+    if "blind_test_samples" not in st.session_state:
+        st.session_state.blind_test_samples = []
     
-    # Show vote statistics
-    st.markdown("### 🗳️ Vote Statistics")
-    vote_stats = db.get_vote_statistics()
+    if "blind_test_results" not in st.session_state:
+        st.session_state.blind_test_results = []
     
-    col1, col2 = st.columns(2)
+    if "blind_test_voted" not in st.session_state:
+        st.session_state.blind_test_voted = False
+    
+    if "blind_test_vote_choice" not in st.session_state:
+        st.session_state.blind_test_vote_choice = None
+    
+    # Test setup section
+    st.subheader("🔧 Test Setup")
+    
+    col1, col2 = st.columns([2, 1])
+    
     with col1:
-        st.metric("Total User Votes", vote_stats['total_votes'])
+        # Text input
+        text_input = st.text_area(
+            "Enter text to test:",
+            value="The quick brown fox jumps over the lazy dog. This is a test of speech synthesis quality.",
+            height=100,
+            max_chars=500
+        )
+        
+        word_count = len(text_input.split())
+        st.caption(f"Word count: {word_count}")
+    
     with col2:
-        if vote_stats['wins']:
-            for provider, wins in vote_stats['wins'].items():
-                st.metric(f"{provider.title()} Votes", wins)
+        st.markdown("""
+        **How Blind Testing Works:**
+        1. Enter text to synthesize
+        2. Audio generated from all providers
+        3. Samples randomized (labeled A, B, etc.)
+        4. Listen and vote for your favorite
+        5. Results revealed after voting
+        """)
     
-    # Show updated ELO rankings
-    st.markdown("### 🏆 Current ELO Rankings")
-    leaderboard = st.session_state.benchmark_engine.get_leaderboard()
+    # Generate blind test samples
+    if st.button("🎵 Generate Blind Test", type="primary"):
+        if text_input and len(configured_providers) >= 2:
+            # Validate input
+            valid, error_msg = session_manager.validate_request(text_input)
+            if valid:
+                generate_blind_test_samples(text_input, configured_providers)
+            else:
+                st.error(f"❌ {error_msg}")
+        else:
+            st.error("Please enter text. At least 2 providers must be configured.")
     
-    if leaderboard:
-        for entry in leaderboard:
-            rank_emoji = ["🥇", "🥈", "🥉"][entry['rank']-1] if entry['rank'] <= 3 else f"{entry['rank']}."
-            st.write(f"{rank_emoji} **{entry['provider'].title()}** - {entry['elo_rating']} ELO")
+    # Display blind test samples if available
+    if st.session_state.blind_test_samples:
+        display_blind_test_samples()
+
+def generate_blind_test_samples(text: str, providers: List[str]):
+    """Generate audio samples for blind testing"""
     
-    st.balloons()  # Celebration animation!
+    import random
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    results = []
+    
+    async def test_provider(provider_id: str):
+        try:
+            provider = TTSProviderFactory.create_provider(provider_id)
+            
+            # Use first available voice for each provider
+            voices = TTS_PROVIDERS[provider_id].supported_voices
+            voice = voices[0] if voices else "default"
+            
+            # Create test sample
+            sample = TestSample(
+                id="blind_test",
+                text=text,
+                word_count=len(text.split()),
+                category="blind_test",
+                length_category="custom",
+                complexity_score=0.5
+            )
+            
+            result = await st.session_state.benchmark_engine.run_single_test(
+                provider, sample, voice
+            )
+            return result
+            
+        except Exception as e:
+            st.error(f"Error testing provider: {str(e)}")
+            return None
+    
+    # Run tests
+    for i, provider_id in enumerate(providers):
+        status_text.text(f"Generating sample {i+1}/{len(providers)}...")
+        
+        result = asyncio.run(test_provider(provider_id))
+        
+        if result and result.success:
+            results.append(result)
+        
+        progress_bar.progress((i + 1) / len(providers))
+    
+    status_text.text("Samples generated!")
+    
+    if len(results) < 2:
+        st.error("❌ Not enough successful samples generated. Please try again.")
+        st.session_state.blind_test_samples = []
+        return
+    
+    # Randomize the order of samples
+    random.shuffle(results)
+    
+    # Assign anonymous labels (A, B, C, etc.)
+    labels = ['A', 'B', 'C', 'D', 'E', 'F']
+    for i, result in enumerate(results):
+        result.blind_label = labels[i]
+    
+    # Store samples in session state
+    st.session_state.blind_test_samples = results
+    st.session_state.blind_test_voted = False
+    st.session_state.blind_test_vote_choice = None
+    
+    st.success(f"✅ Generated {len(results)} blind test samples!")
+    st.rerun()
+
+def display_blind_test_samples():
+    """Display blind test samples for voting"""
+    
+    samples = st.session_state.blind_test_samples
+    
+    if not st.session_state.blind_test_voted:
+        # Voting phase - don't reveal providers
+        st.subheader("🔊 Listen and Vote")
+        st.markdown("**Listen to each sample and vote for the one with the best quality:**")
+        
+        # Display samples in columns
+        cols = st.columns(len(samples))
+        
+        for i, result in enumerate(samples):
+            with cols[i]:
+                st.markdown(f"### Sample {result.blind_label}")
+                
+                if result.audio_data:
+                    # Audio player
+                    st.audio(result.audio_data, format="audio/mp3")
+                    st.caption(f"Sample {result.blind_label}")
+        
+        st.divider()
+        
+        # Voting section
+        st.markdown("### 🗳️ Cast Your Vote")
+        
+        vote_options = [f"Sample {r.blind_label}" for r in samples]
+        selected_sample = st.radio(
+            "Which sample sounds best to you?",
+            vote_options,
+            key="blind_vote_radio"
+        )
+        
+        if st.button("✅ Submit Vote", type="primary", use_container_width=True):
+            # Record vote
+            selected_label = selected_sample.split()[1]  # Extract label (A, B, C, etc.)
+            st.session_state.blind_test_vote_choice = selected_label
+            st.session_state.blind_test_voted = True
+            
+            # Find the winning sample
+            winner_result = next(r for r in samples if r.blind_label == selected_label)
+            
+            # Update ELO ratings - winner beats all others
+            for result in samples:
+                if result.blind_label != selected_label:
+                    handle_blind_test_vote(winner_result, result)
+            
+            st.rerun()
+    
+    else:
+        # Results phase - reveal providers
+        st.subheader("🎉 Results Revealed!")
+        
+        # Show which sample the user voted for
+        voted_sample = next(r for r in samples if r.blind_label == st.session_state.blind_test_vote_choice)
+        
+        st.success(f"**You voted for Sample {st.session_state.blind_test_vote_choice}**")
+        st.info(f"**Sample {st.session_state.blind_test_vote_choice} was generated by: {voted_sample.provider.title()} ({voted_sample.model_name})**")
+        
+        st.divider()
+        
+        # Show all samples with revealed providers
+        st.subheader("🔓 All Samples Revealed")
+        
+        # Create comparison table
+        comparison_data = []
+        for result in sorted(samples, key=lambda r: r.blind_label):
+            is_winner = result.blind_label == st.session_state.blind_test_vote_choice
+            comparison_data.append({
+                "Sample": result.blind_label,
+                "Provider": result.provider.title(),
+                "Model": result.model_name,
+                "Location": get_location_display(result),
+                "Latency (ms)": f"{result.latency_ms:.1f}",
+                "File Size (KB)": f"{result.file_size_bytes / 1024:.1f}",
+                "Your Choice": "🏆 Winner" if is_winner else ""
+            })
+        
+        df = pd.DataFrame(comparison_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Show audio samples with labels
+        st.subheader("🔊 Listen Again (with provider names)")
+        
+        cols = st.columns(len(samples))
+        for i, result in enumerate(sorted(samples, key=lambda r: r.blind_label)):
+            with cols[i]:
+                is_winner = result.blind_label == st.session_state.blind_test_vote_choice
+                if is_winner:
+                    st.markdown(f"### 🏆 Sample {result.blind_label}")
+                else:
+                    st.markdown(f"### Sample {result.blind_label}")
+                
+                st.markdown(f"**{result.provider.title()}**")
+                st.caption(result.model_name)
+                
+                if result.audio_data:
+                    st.audio(result.audio_data, format="audio/mp3")
+                    st.caption(f"{result.latency_ms:.1f}ms | {result.file_size_bytes/1024:.1f}KB")
+        
+        st.divider()
+        
+        # Action buttons
+    col1, col2 = st.columns(2)
+        
+    with col1:
+            if st.button("🔄 Start New Blind Test", type="primary", use_container_width=True):
+                st.session_state.blind_test_samples = []
+                st.session_state.blind_test_voted = False
+                st.session_state.blind_test_vote_choice = None
+                st.rerun()
+        
+    with col2:
+            if st.button("📊 View Leaderboard", use_container_width=True):
+                # Navigate to leaderboard by setting session state
+                st.session_state.navigate_to = "Leaderboard"
+                st.rerun()
+
+def handle_blind_test_vote(winner_result: BenchmarkResult, loser_result: BenchmarkResult):
+    """Handle blind test vote and update ELO ratings"""
+    
+    from database import db
+    
+    try:
+        # Get current ratings
+        winner_rating_before = db.get_elo_rating(winner_result.provider)
+        loser_rating_before = db.get_elo_rating(loser_result.provider)
+        
+        # Update ratings
+        new_winner_rating, new_loser_rating = db.update_elo_ratings(
+            winner_result.provider, loser_result.provider, k_factor=32
+        )
+        
+        # Save the vote in database
+        db.save_user_vote(
+            winner_result.provider, 
+            loser_result.provider, 
+            winner_result.text[:100] + "..." if len(winner_result.text) > 100 else winner_result.text,
+            session_id="blind_test_session"
+        )
+        
+    except Exception as e:
+        st.error(f"Error updating ratings: {e}")
 
 def batch_benchmark_page():
     """Batch benchmark page for comprehensive testing"""
@@ -489,11 +713,7 @@ def batch_benchmark_page():
     # Dataset source selection
     st.subheader("📚 Dataset Source")
     
-    dataset_source = st.radio(
-        "Choose dataset source:",
-        ["Generate New Dataset", "Use Uploaded Samples", "Combine Both"],
-        help="Select whether to use generated samples, uploaded samples, or both"
-    )
+    dataset_source = "Generate New Dataset"
     
     # Generate dataset button
     if st.button("📊 Prepare Test Dataset"):
@@ -512,54 +732,15 @@ def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List
     with st.spinner("Preparing test dataset..."):
         final_samples = []
         
-        if dataset_source == "Generate New Dataset":
-            # Generate new samples
-            all_samples = st.session_state.dataset_generator.generate_dataset(sample_count * 2)
-            
-            # Filter samples
-            for sample in all_samples:
-                if (sample.category in categories and 
-                    sample.length_category in lengths and 
-                    len(final_samples) < sample_count):
-                    final_samples.append(sample)
+        # Generate new samples
+        all_samples = st.session_state.dataset_generator.generate_dataset(sample_count * 2)
         
-        elif dataset_source == "Use Uploaded Samples":
-            # Use uploaded samples
-            uploaded_samples = st.session_state.uploaded_samples
-            
-            if not uploaded_samples:
-                st.error("No uploaded samples available. Please upload files first.")
-                return
-            
-            # Filter uploaded samples
-            for sample in uploaded_samples:
-                if (sample.category in categories and 
-                    sample.length_category in lengths and 
-                    len(final_samples) < sample_count):
-                    final_samples.append(sample)
-        
-        elif dataset_source == "Combine Both":
-            # Combine generated and uploaded samples
-            uploaded_samples = st.session_state.uploaded_samples
-            
-            # Use half from each source
-            target_generated = sample_count // 2
-            target_uploaded = sample_count - target_generated
-            
-            # Add generated samples
-            all_samples = st.session_state.dataset_generator.generate_dataset(target_generated * 2)
-            for sample in all_samples:
-                if (sample.category in categories and 
-                    sample.length_category in lengths and 
-                    len([s for s in final_samples if s.id.startswith('sample_')]) < target_generated):
-                    final_samples.append(sample)
-            
-            # Add uploaded samples
-            for sample in uploaded_samples:
-                if (sample.category in categories and 
-                    sample.length_category in lengths and 
-                    len([s for s in final_samples if not s.id.startswith('sample_')]) < target_uploaded):
-                    final_samples.append(sample)
+        # Filter samples
+        for sample in all_samples:
+            if (sample.category in categories and 
+                sample.length_category in lengths and 
+                len(final_samples) < sample_count):
+                final_samples.append(sample)
         
         st.session_state.test_samples = final_samples
     
@@ -567,7 +748,7 @@ def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List
         st.success(f"Prepared {len(final_samples)} test samples")
         
         # Display sample statistics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.metric("Total Samples", len(final_samples))
@@ -579,12 +760,6 @@ def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List
         with col3:
             avg_complexity = sum(s.complexity_score for s in final_samples) / len(final_samples)
             st.metric("Avg Complexity", f"{avg_complexity:.2f}")
-        
-        with col4:
-            # Count source types
-            generated_count = len([s for s in final_samples if s.id.startswith('sample_')])
-            uploaded_count = len(final_samples) - generated_count
-            st.metric("Generated/Uploaded", f"{generated_count}/{uploaded_count}")
         
         # Show sample breakdown
         with st.expander("📋 Sample Breakdown"):
@@ -655,11 +830,16 @@ def display_benchmark_summary(results: List[BenchmarkResult]):
     # Calculate summary statistics
     summaries = st.session_state.benchmark_engine.calculate_summary_stats(results)
     
-    # Create summary table
+    # Create summary table with model names
+    # Get current location for display
+    current_location = geo_service.get_location_string()
+    
     summary_data = []
     for provider, summary in summaries.items():
         summary_data.append({
             "Provider": provider.title(),
+            "Model": get_model_name(provider),
+            "Location": f"{geo_service.get_country_flag()} {current_location}",
             "Success Rate": f"{summary.success_rate:.1f}%",
             "Avg Latency": f"{summary.avg_latency_ms:.1f}ms",
             "P95 Latency": f"{summary.p95_latency_ms:.1f}ms",
@@ -776,21 +956,39 @@ def leaderboard_page():
         # Fallback if visualization fails
         pass
     
-    # Enhanced leaderboard table
+    # Enhanced leaderboard table with latency stats
     st.subheader("📊 Current Rankings")
+    
+    # Get latency statistics for each provider
+    from database import db
+    latency_stats = db.get_latency_stats_by_provider()
+    
+    # Get current location for display
+    current_location = geo_service.get_location_string()
+    location_display = f"{geo_service.get_country_flag()} {current_location}"
     
     df_leaderboard = pd.DataFrame(leaderboard)
     df_leaderboard["Provider"] = df_leaderboard["provider"].str.title()
     
+    # Add model names, location, and latency stats
+    df_leaderboard["Model"] = df_leaderboard["provider"].apply(get_model_name)
+    df_leaderboard["Location"] = location_display
+    df_leaderboard["Avg Latency (ms)"] = df_leaderboard["provider"].apply(
+        lambda p: f"{latency_stats.get(p, {}).get('avg_latency', 0):.1f}"
+    )
+    df_leaderboard["P95 Latency (ms)"] = df_leaderboard["provider"].apply(
+        lambda p: f"{latency_stats.get(p, {}).get('p95_latency', 0):.1f}"
+    )
+    
     # Format the display columns
     display_df = df_leaderboard[[
-        "rank", "Provider", "elo_rating", "games_played", 
-        "wins", "losses", "win_rate"
+        "rank", "Provider", "Model", "Location", "elo_rating", "Avg Latency (ms)", "P95 Latency (ms)",
+        "games_played", "wins", "losses", "win_rate"
     ]].copy()
     
     display_df.columns = [
-        "Rank", "Provider", "ELO Rating", "Games", 
-        "Wins", "Losses", "Win Rate %"
+        "Rank", "Provider", "Model", "Location", "ELO Rating", "Avg Latency", "P95 Latency",
+        "Games", "Wins", "Losses", "Win Rate %"
     ]
     
     st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -804,9 +1002,13 @@ def leaderboard_page():
     
     if provider_stats:
         stats_data = []
+        location_display = f"{geo_service.get_country_flag()} {geo_service.get_location_string()}"
+        
         for provider, stats in provider_stats.items():
             stats_data.append({
                 "Provider": provider.title(),
+                "Model": get_model_name(provider),
+                "Location": location_display,
                 "Total Tests": stats['total_tests'],
                 "Success Rate %": f"{stats['success_rate']:.1f}%",
                 "Avg Latency (ms)": f"{stats['avg_latency']:.1f}",
@@ -829,6 +1031,8 @@ def leaderboard_page():
             # Show vote wins per provider
             if vote_stats['wins']:
                 vote_data = []
+                location_display = f"{geo_service.get_country_flag()} {geo_service.get_location_string()}"
+                
                 for provider, wins in vote_stats['wins'].items():
                     losses = vote_stats['losses'].get(provider, 0)
                     total = wins + losses
@@ -836,6 +1040,8 @@ def leaderboard_page():
                     
                     vote_data.append({
                         "Provider": provider.title(),
+                        "Model": get_model_name(provider),
+                        "Location": location_display,
                         "User Votes Won": wins,
                         "User Win Rate %": f"{win_rate:.1f}%"
                     })
@@ -922,319 +1128,6 @@ def dataset_management_page():
             filename = f"dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             st.session_state.dataset_generator.export_dataset(filename)
             st.success(f"Dataset exported to {filename}")
-
-def upload_custom_text_page():
-    """Upload custom text files page"""
-    
-    st.header("📁 Upload Custom Text")
-    st.markdown("Upload your own text files to create custom benchmarking datasets")
-    
-    # File upload section
-    st.subheader("📤 File Upload")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        uploaded_files = st.file_uploader(
-            "Choose text files",
-            type=['txt', 'csv', 'json', 'md', 'py', 'js', 'html'],
-            accept_multiple_files=True,
-            help="Supported formats: TXT, CSV, JSON, Markdown, Python, JavaScript, HTML"
-        )
-        
-        # Processing options
-        st.subheader("🔧 Processing Options")
-        
-        auto_categorize = st.checkbox(
-            "Auto-categorize content", 
-            value=True,
-            help="Automatically categorize text as technical, news, literature, or conversation"
-        )
-        
-        max_samples = st.slider(
-            "Maximum samples per file",
-            min_value=10,
-            max_value=200,
-            value=50,
-            help="Limit the number of text samples extracted from each file"
-        )
-        
-        min_words = st.slider(
-            "Minimum words per sample",
-            min_value=5,
-            max_value=50,
-            value=10,
-            help="Skip text samples with fewer words than this"
-        )
-    
-    with col2:
-        st.subheader("ℹ️ Upload Guidelines")
-        
-        st.markdown("""
-        **Supported File Types:**
-        - **TXT**: Plain text files
-        - **CSV**: Text data in columns
-        - **JSON**: String values from JSON
-        - **MD**: Markdown content
-        - **PY/JS**: Comments and strings
-        - **HTML**: Text content from tags
-        
-        **Best Practices:**
-        - Use files with diverse content
-        - Include various text lengths
-        - Ensure text is readable and meaningful
-        - Avoid files with mostly code/data
-        """)
-        
-        if st.session_state.uploaded_samples:
-            st.success(f"✅ {len(st.session_state.uploaded_samples)} samples ready")
-    
-    # Process uploaded files
-    if uploaded_files:
-        if st.button("🔄 Process Files", type="primary"):
-            process_uploaded_files(uploaded_files, auto_categorize, max_samples, min_words)
-    
-    # Display processed samples
-    if st.session_state.uploaded_samples:
-        display_uploaded_samples()
-    
-    # Manual text input section
-    st.divider()
-    st.subheader("✍️ Manual Text Input")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        manual_text = st.text_area(
-            "Enter custom text:",
-            height=150,
-            placeholder="Paste your text here or enter multiple lines...",
-            help="Enter text directly. Each line will be treated as a separate sample."
-        )
-        
-        if manual_text:
-            manual_category = st.selectbox(
-                "Category for manual text:",
-                ["uploaded", "technical", "news", "literature", "conversation", "narrative"]
-            )
-    
-    with col2:
-        st.markdown("""
-        **Manual Input Tips:**
-        - Each line becomes a sample
-        - Minimum 10 words per line
-        - Mix different text types
-        - Use realistic content
-        """)
-    
-    if manual_text and st.button("➕ Add Manual Text"):
-        add_manual_text(manual_text, manual_category, min_words)
-
-def process_uploaded_files(uploaded_files, auto_categorize: bool, max_samples: int, min_words: int):
-    """Process uploaded files and extract text samples"""
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    all_samples = []
-    
-    for i, uploaded_file in enumerate(uploaded_files):
-        status_text.text(f"Processing {uploaded_file.name}...")
-        
-        try:
-            # Read file content
-            file_content = uploaded_file.read()
-            
-            # Parse the file
-            parsed_texts = st.session_state.text_parser.parse_uploaded_file(
-                file_content, uploaded_file.name
-            )
-            
-            # Filter by minimum words
-            filtered_texts = [
-                pt for pt in parsed_texts 
-                if len(pt.content.split()) >= min_words
-            ]
-            
-            # Limit samples per file
-            if len(filtered_texts) > max_samples:
-                filtered_texts = filtered_texts[:max_samples]
-            
-            # Convert to test samples
-            samples = st.session_state.text_parser.create_test_samples_from_parsed(
-                filtered_texts, auto_categorize
-            )
-            
-            # Update sample IDs to include file info
-            for j, sample in enumerate(samples):
-                sample.id = f"upload_{uploaded_file.name}_{j+1:03d}"
-            
-            all_samples.extend(samples)
-            
-        except Exception as e:
-            st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-        
-        progress_bar.progress((i + 1) / len(uploaded_files))
-    
-    # Store samples
-    st.session_state.uploaded_samples = all_samples
-    
-    status_text.text("Processing completed!")
-    
-    if all_samples:
-        st.success(f"✅ Extracted {len(all_samples)} text samples from {len(uploaded_files)} files")
-        
-        # Show summary statistics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Samples", len(all_samples))
-        
-        with col2:
-            avg_words = sum(s.word_count for s in all_samples) / len(all_samples)
-            st.metric("Avg Words", f"{avg_words:.1f}")
-        
-        with col3:
-            categories = set(s.category for s in all_samples)
-            st.metric("Categories", len(categories))
-        
-        with col4:
-            avg_complexity = sum(s.complexity_score for s in all_samples) / len(all_samples)
-            st.metric("Avg Complexity", f"{avg_complexity:.2f}")
-    else:
-        st.warning("No text samples could be extracted from the uploaded files.")
-
-def add_manual_text(text: str, category: str, min_words: int):
-    """Add manually entered text as samples"""
-    
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-    new_samples = []
-    
-    for i, line in enumerate(lines):
-        if len(line.split()) >= min_words:
-            # Validate with security checks
-            valid, error_msg = session_manager.validate_request(line)
-            if valid:
-                word_count = len(line.split())
-                
-                # Determine length category
-                if word_count <= 30:
-                    length_category = "short"
-                elif word_count <= 80:
-                    length_category = "medium"
-                elif word_count <= 150:
-                    length_category = "long"
-                else:
-                    length_category = "very_long"
-                
-                # Calculate complexity
-                complexity = st.session_state.text_parser._calculate_complexity_score(line)
-                
-                sample = TestSample(
-                    id=f"manual_{len(st.session_state.uploaded_samples) + i + 1:03d}",
-                    text=line,
-                    word_count=word_count,
-                    category=category,
-                    length_category=length_category,
-                    complexity_score=complexity
-                )
-                
-                new_samples.append(sample)
-            else:
-                st.warning(f"Skipped line due to validation error: {error_msg}")
-    
-    if new_samples:
-        st.session_state.uploaded_samples.extend(new_samples)
-        st.success(f"✅ Added {len(new_samples)} text samples")
-    else:
-        st.warning("No valid text samples could be created from the input.")
-
-def display_uploaded_samples():
-    """Display uploaded samples with management options"""
-    
-    st.subheader("📋 Uploaded Samples")
-    
-    samples = st.session_state.uploaded_samples
-    
-    if not samples:
-        st.info("No uploaded samples available.")
-        return
-    
-    # Sample management controls
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("🗑️ Clear All Samples"):
-            st.session_state.uploaded_samples = []
-            st.success("All samples cleared!")
-            st.rerun()
-    
-    with col2:
-        if st.button("🚀 Use for Benchmark"):
-            # Add uploaded samples to the main test samples
-            if not hasattr(st.session_state, 'test_samples'):
-                st.session_state.test_samples = []
-            
-            st.session_state.test_samples.extend(samples)
-            st.success(f"Added {len(samples)} samples to benchmark dataset!")
-    
-    with col3:
-        if st.button("💾 Export Samples"):
-            # Export as JSON
-            filename = f"uploaded_samples_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            st.session_state.dataset_generator.samples = samples
-            st.session_state.dataset_generator.export_dataset(filename)
-            st.success(f"Exported to {filename}")
-    
-    # Display sample table
-    st.subheader("📊 Sample Preview")
-    
-    # Create preview data
-    preview_data = []
-    for i, sample in enumerate(samples[:20]):  # Show first 20
-        preview_data.append({
-            "ID": sample.id,
-            "Text Preview": sample.text[:80] + "..." if len(sample.text) > 80 else sample.text,
-            "Words": sample.word_count,
-            "Category": sample.category,
-            "Length": sample.length_category,
-            "Complexity": f"{sample.complexity_score:.2f}"
-        })
-    
-    df = pd.DataFrame(preview_data)
-    st.dataframe(df, use_container_width=True)
-    
-    if len(samples) > 20:
-        st.caption(f"Showing first 20 of {len(samples)} samples")
-    
-    # Category distribution
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        category_counts = {}
-        for sample in samples:
-            category_counts[sample.category] = category_counts.get(sample.category, 0) + 1
-        
-        if category_counts:
-            fig_categories = px.pie(
-                values=list(category_counts.values()),
-                names=list(category_counts.keys()),
-                title="Category Distribution"
-            )
-            st.plotly_chart(fig_categories, use_container_width=True)
-    
-    with col2:
-        length_counts = {}
-        for sample in samples:
-            length_counts[sample.length_category] = length_counts.get(sample.length_category, 0) + 1
-        
-        if length_counts:
-            fig_lengths = px.bar(
-                x=list(length_counts.keys()),
-                y=list(length_counts.values()),
-                title="Length Distribution"
-            )
-            st.plotly_chart(fig_lengths, use_container_width=True)
 
 def export_results_page():
     """Export results page"""
@@ -1342,9 +1235,11 @@ def export_results_page():
             if filtered_results:
                 st.subheader("📋 Export Preview")
                 
-                # Show sample data
+                # Show sample data with model names and location
                 df = pd.DataFrame([{
-                    "Provider": r.provider,
+                    "Provider": r.provider.title(),
+                    "Model": r.model_name if hasattr(r, 'model_name') and r.model_name else TTS_PROVIDERS.get(r.provider, {}).get('model_name', r.provider),
+                    "Location": get_location_display(r) if hasattr(r, 'location_country') else '🌍 Unknown',
                     "Success": r.success,
                     "Latency (ms)": r.latency_ms,
                     "File Size (KB)": r.file_size_bytes / 1024,

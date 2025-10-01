@@ -129,7 +129,7 @@ class ExportManager:
                 metadata_df.columns = [f"metadata_{col}" for col in metadata_df.columns]
                 results_df = pd.concat([results_df.drop('metadata', axis=1), metadata_df], axis=1)
             
-            results_df.to_sheet(writer, sheet_name='Raw Results', index=False)
+            results_df.to_excel(writer, sheet_name='Raw Results', index=False)
             
             # Summary sheet
             summary_data = []
@@ -140,8 +140,21 @@ class ExportManager:
             summary_df = pd.DataFrame(summary_data)
             summary_df.to_excel(writer, sheet_name='Summary', index=False)
             
-            # Leaderboard sheet
+            # Leaderboard sheet - add model names
+            from config import TTS_PROVIDERS
+            
+            def get_model_name(provider: str) -> str:
+                """Helper to get model name"""
+                return TTS_PROVIDERS.get(provider).model_name if provider in TTS_PROVIDERS else provider
+            
             leaderboard_df = pd.DataFrame(leaderboard)
+            if 'provider' in leaderboard_df.columns and 'model' not in leaderboard_df.columns:
+                leaderboard_df['model'] = leaderboard_df['provider'].apply(get_model_name)
+                # Reorder columns to put model after provider
+                cols = leaderboard_df.columns.tolist()
+                provider_idx = cols.index('provider')
+                cols.insert(provider_idx + 1, cols.pop(cols.index('model')))
+                leaderboard_df = leaderboard_df[cols]
             leaderboard_df.to_excel(writer, sheet_name='Leaderboard', index=False)
             
             # Success rate analysis

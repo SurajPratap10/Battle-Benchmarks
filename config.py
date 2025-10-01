@@ -14,6 +14,7 @@ class TTSConfig:
     supported_voices: List[str]
     max_chars: int
     supports_streaming: bool
+    model_name: str = ""  # Full model name for display
 
 # TTS Provider Configurations
 TTS_PROVIDERS = {
@@ -23,7 +24,8 @@ TTS_PROVIDERS = {
         base_url="https://api.murf.ai/v1/speech/generate",
         supported_voices=["en-US-natalie", "en-US-miles", "en-US-amara", "en-US-maverick", "en-US-ken", "en-US-terrell"],
         max_chars=3000,
-        supports_streaming=False
+        supports_streaming=False,
+        model_name="Murf AI TTS v1"
     ),
     "deepgram": TTSConfig(
         name="Deepgram",
@@ -31,7 +33,8 @@ TTS_PROVIDERS = {
         base_url="https://api.deepgram.com/v1/speak",
         supported_voices=["aura-asteria-en", "aura-luna-en", "aura-stella-en", "aura-athena-en", "aura-hera-en", "aura-orion-en"],
         max_chars=2000,
-        supports_streaming=True
+        supports_streaming=True,
+        model_name="Deepgram Aura (v1 API)"
     )
 }
 

@@ -19,45 +19,74 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual Environment
-venv/
-env/
-ENV/
+MANIFEST
 
 # Environment variables
 .env
-
-# Database (keep local, will be recreated on deployment)
-*.db
-
-# Audio files (temporary)
-*.mp3
-*.wav
-
-# Temporary files
-*.tmp
-*.temp
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/
 
-# Export files (temporary)
-benchmark_*.json
-benchmark_*.csv
-benchmark_*.xlsx
+# Data and exports
+data/
+exports/
+benchmark_results_*.json
+benchmark_results_*.csv
+benchmark_results_*.xlsx
+benchmark_package_*.zip
 dataset_*.json
-*.zip
+demo_*.json
+
+# Database
+benchmark_data.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Audio files
+*.mp3
+*.wav
+*.m4a
+test_audio.*
+*_test_output.*
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

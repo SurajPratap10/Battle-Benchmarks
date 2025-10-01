@@ -37,9 +37,26 @@ class BenchmarkDatabase:
                 metadata TEXT,
                 timestamp DATETIME,
                 category TEXT,
-                word_count INTEGER
+                word_count INTEGER,
+                location_country TEXT,
+                location_city TEXT,
+                location_region TEXT
             )
         ''')
+        
+        # Add geolocation columns if they don't exist (for existing databases)
+        try:
+            cursor.execute('ALTER TABLE benchmark_results ADD COLUMN location_country TEXT')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE benchmark_results ADD COLUMN location_city TEXT')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE benchmark_results ADD COLUMN location_region TEXT')
+        except:
+            pass
         
         # Create ELO ratings table
         cursor.execute('''
@@ -105,8 +122,9 @@ class BenchmarkDatabase:
         cursor.execute('''
             INSERT INTO benchmark_results 
             (test_id, provider, voice, text, success, latency_ms, file_size_bytes, 
-             error_message, metadata, timestamp, category, word_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             error_message, metadata, timestamp, category, word_count, 
+             location_country, location_city, location_region)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             test_id or f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             result.provider,
@@ -119,7 +137,10 @@ class BenchmarkDatabase:
             json.dumps(result.metadata) if result.metadata else "{}",
             datetime.now(),
             getattr(result.sample, 'category', 'unknown') if hasattr(result, 'sample') else 'unknown',
-            getattr(result.sample, 'word_count', 0) if hasattr(result, 'sample') else 0
+            getattr(result.sample, 'word_count', 0) if hasattr(result, 'sample') else 0,
+            getattr(result, 'location_country', 'Unknown'),
+            getattr(result, 'location_city', 'Unknown'),
+            getattr(result, 'location_region', 'Unknown')
         ))
         
         conn.commit()
@@ -400,6 +421,62 @@ class BenchmarkDatabase:
             'recent_votes': recent_votes,
             'total_votes': sum(wins.values())
         }
+    
+    def get_latency_stats_by_provider(self) -> Dict[str, Dict]:
+        """Get latency statistics including P95 for each provider"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get all successful results grouped by provider
+        cursor.execute('''
+            SELECT provider, latency_ms 
+            FROM benchmark_results 
+            WHERE success = 1 AND latency_ms > 0
+            ORDER BY provider, latency_ms
+        ''')
+        results = cursor.fetchall()
+        conn.close()
+        
+        # Group by provider and calculate statistics
+        provider_latencies = {}
+        for provider, latency in results:
+            if provider not in provider_latencies:
+                provider_latencies[provider] = []
+            provider_latencies[provider].append(latency)
+        
+        # Calculate statistics for each provider
+        stats = {}
+        for provider, latencies in provider_latencies.items():
+            if not latencies:
+                continue
+            
+            latencies_sorted = sorted(latencies)
+            n = len(latencies_sorted)
+            
+            # Calculate percentiles
+            def percentile(data, p):
+                if not data:
+                    return 0
+                index = (p / 100) * (len(data) - 1)
+                if index.is_integer():
+                    return data[int(index)]
+                else:
+                    lower = data[int(index)]
+                    upper = data[int(index) + 1]
+                    return lower + (upper - lower) * (index - int(index))
+            
+            stats[provider] = {
+                'avg_latency': sum(latencies) / n if n > 0 else 0,
+                'median_latency': percentile(latencies_sorted, 50),
+                'p90_latency': percentile(latencies_sorted, 90),
+                'p95_latency': percentile(latencies_sorted, 95),
+                'p99_latency': percentile(latencies_sorted, 99),
+                'min_latency': latencies_sorted[0] if latencies_sorted else 0,
+                'max_latency': latencies_sorted[-1] if latencies_sorted else 0,
+                'total_tests': n
+            }
+        
+        return stats
 
 # Global database instance
 db = BenchmarkDatabase()

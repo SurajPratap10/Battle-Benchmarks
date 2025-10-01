@@ -14,6 +14,7 @@ from tts_providers import TTSProvider, TTSRequest, TTSResult, TTSProviderFactory
 from dataset import TestSample, DatasetGenerator
 from config import BENCHMARK_CONFIG
 from database import db
+from geolocation import geo_service
 
 @dataclass
 class BenchmarkResult:
@@ -32,6 +33,10 @@ class BenchmarkResult:
     iteration: int
     audio_data: Optional[bytes] = None
     sample: Optional[TestSample] = None
+    model_name: str = ""  # Full model name for display
+    location_country: str = ""  # Country where test was run
+    location_city: str = ""  # City where test was run
+    location_region: str = ""  # Region/State where test was run
 
 @dataclass
 class BenchmarkSummary:
@@ -92,6 +97,13 @@ class BenchmarkEngine:
         # Generate speech
         result = await provider.generate_speech(request)
         
+        # Get model name from config
+        from config import TTS_PROVIDERS
+        model_name = TTS_PROVIDERS.get(provider.provider_id).model_name if provider.provider_id in TTS_PROVIDERS else provider.provider_id
+        
+        # Get geolocation
+        location = geo_service.get_location()
+        
         # Create benchmark result
         benchmark_result = BenchmarkResult(
             test_id=f"{provider.provider_id}_{sample.id}_{iteration}",
@@ -113,7 +125,11 @@ class BenchmarkEngine:
             },
             iteration=iteration,
             audio_data=result.audio_data,
-            sample=sample
+            sample=sample,
+            model_name=model_name,
+            location_country=location.get('country', 'Unknown'),
+            location_city=location.get('city', 'Unknown'),
+            location_region=location.get('region', 'Unknown')
         )
         
         # Save to database
