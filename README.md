@@ -141,7 +141,3 @@ docker run -p 8501:8501 --env-file .env tts-benchmark
 - Rate limiting to prevent API abuse
 - Database caching for historical data
 - Optimized for production workloads
-
-## License
-
-MIT License - see LICENSE file for details
