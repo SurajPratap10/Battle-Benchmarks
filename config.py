@@ -72,7 +72,7 @@ TTS_PROVIDERS = {
         supports_streaming=True,
         model_name="aura-2"
     ),
-    "elevenlabs": TTSConfig(
+    "elevenlabs_flash": TTSConfig(
         name="ElevenLabs Flash",
         api_key_env="ELEVENLABS_API_KEY",
         base_url="https://api.elevenlabs.io/v1/text-to-speech",
@@ -80,6 +80,15 @@ TTS_PROVIDERS = {
         max_chars=5000,
         supports_streaming=True,
         model_name="eleven_flash_v2_5"
+    ),
+    "elevenlabs_v3": TTSConfig(
+        name="ElevenLabs v3",
+        api_key_env="ELEVENLABS_API_KEY",
+        base_url="https://api.elevenlabs.io/v1/text-to-speech",
+        supported_voices=["Rachel", "Domi", "Bella", "Antoni", "Elli", "Josh", "Arnold", "Adam", "Sam"],
+        max_chars=5000,
+        supports_streaming=True,
+        model_name="eleven_v3"
     ),
     "openai": TTSConfig(
         name="OpenAI",
