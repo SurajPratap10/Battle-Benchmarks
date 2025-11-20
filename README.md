@@ -11,7 +11,7 @@ Production-ready benchmarking tool for comparing Text-to-Speech (TTS) providers 
 - **Blind Testing**: Unbiased audio quality comparison
 - **Batch Testing**: Comprehensive benchmarks across diverse datasets
 - **Persistent Storage**: SQLite database for historical data
-- 
+
 ## Quick Start
 
 ### Prerequisites
