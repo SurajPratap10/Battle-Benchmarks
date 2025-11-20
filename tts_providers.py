@@ -122,7 +122,7 @@ class MurfAITTSProvider(TTSProvider):
             "voiceId": request.voice,
             "format": "mp3",  # Murf v1 uses 'format' not 'audioFormat'
             "sampleRate": 24000,
-            "channelType": "STEREO"
+            "channelType": "MONO"
         }
         
         # Add speed/rate if specified
@@ -286,7 +286,8 @@ class MurfFalconTTSProvider(TTSProvider):
             "text": request.text,
             "voiceId": request.voice,
             "format": "mp3",  # Use 'format' for consistency
-            "sampleRate": 24000
+            "sampleRate": 24000,
+            "channelType": "MONO"
         }
         
         # Add speed/rate if specified
@@ -454,7 +455,8 @@ class MurfFalconOct13TTSProvider(TTSProvider):
             "voiceId": request.voice,
             "format": "mp3",
             "sampleRate": 24000,
-            "model": "FALCON"
+            "model": "FALCON",
+            "channelType": "MONO"
         }
         
         # Add speed/rate if specified
@@ -555,7 +557,8 @@ class MurfFalconOct23TTSProvider(TTSProvider):
             "voiceId": request.voice,
             "format": "mp3",
             "sampleRate": 24000,
-            "model": "FALCON"
+            "model": "FALCON",
+            "channelType": "MONO"
         }
         
         # Add speed/rate if specified
