@@ -102,6 +102,14 @@ def create_leaderboard_chart(leaderboard: List[Dict[str, Any]]) -> go.Figure:
     ratings = [item["elo_rating"] for item in leaderboard]
     ranks = [item["rank"] for item in leaderboard]
     
+    # Create color scheme - use Viridis for most, distinct colors for bottom 4
+    num_providers = len(providers)
+    colors = list(px.colors.sequential.Viridis[:max(1, num_providers - 4)])
+    
+    # Add distinct colors for bottom 4 bars
+    bottom_colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3']  # Red, Teal, Yellow, Light Teal
+    colors.extend(bottom_colors[:min(4, num_providers)])
+    
     # Create horizontal bar chart
     fig = go.Figure(data=[
         go.Bar(
@@ -112,7 +120,7 @@ def create_leaderboard_chart(leaderboard: List[Dict[str, Any]]) -> go.Figure:
             textposition='inside',
             hovertemplate="<b>%{y}</b><br>ELO Rating: %{x}<br>Rank: #%{customdata}<extra></extra>",
             customdata=ranks,
-            marker_color=px.colors.sequential.Viridis[:len(providers)]
+            marker_color=colors[:num_providers]
         )
     ])
     
