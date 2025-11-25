@@ -16,14 +16,11 @@ class GeolocationService:
         Get current geolocation based on IP address.
         """
         
-        # Check cache first (unless forced refresh)
         if not force_refresh and 'location' in self.cache:
             return self.cache['location']
         
-        # Try multiple geolocation services in order
         location = None
         
-        # Service 1: ipapi.co (reliable, no key needed)
         try:
             response = requests.get('https://ipapi.co/json/', timeout=5)
             if response.status_code == 200:
@@ -44,7 +41,6 @@ class GeolocationService:
         except Exception as e:
             print(f"ipapi.co failed: {e}")
         
-        # Service 2: ip-api.com (backup, free)
         try:
             response = requests.get('http://ip-api.com/json/', timeout=5)
             if response.status_code == 200:
@@ -65,7 +61,6 @@ class GeolocationService:
         except Exception as e:
             print(f"ip-api.com failed: {e}")
         
-        # Service 3: ipinfo.io (another backup)
         try:
             response = requests.get('https://ipinfo.io/json', timeout=5)
             if response.status_code == 200:
@@ -88,7 +83,6 @@ class GeolocationService:
         except Exception as e:
             print(f"ipinfo.io failed: {e}")
         
-        # Return default if all services fail
         return {
             'country': 'Unknown',
             'country_code': 'XX',
@@ -135,14 +129,11 @@ class GeolocationService:
             if not country_code or country_code == 'XX' or country_code == 'Unknown':
                 return '🌍'
             
-            # Convert country code to flag emoji
-            # Each letter is converted to its regional indicator symbol
             flag = ''.join(chr(ord(c) + 127397) for c in country_code.upper())
             return flag
         except Exception as e:
             print(f"Error getting country flag: {e}")
             return '🌍'
 
-# Global instance
 geo_service = GeolocationService()
 
