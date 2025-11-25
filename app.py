@@ -12,11 +12,9 @@ import time
 from datetime import datetime
 from typing import Dict, List, Any
 
-# Load environment variables first
 from dotenv import load_dotenv
 load_dotenv()
 
-# Import our modules
 from config import TTS_PROVIDERS, UI_CONFIG, validate_config
 from dataset import DatasetGenerator, TestSample
 from benchmarking_engine import BenchmarkEngine, BenchmarkResult
@@ -26,7 +24,6 @@ from security import session_manager
 from geolocation import geo_service
 from database import BenchmarkDatabase
 
-# Page configuration
 st.set_page_config(
     page_title=UI_CONFIG["page_title"],
     page_icon=UI_CONFIG["page_icon"],
@@ -34,15 +31,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Load external CSS
 def load_css():
     with open('styles.css', 'r') as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-# Apply custom styles
 load_css()
 
-# Initialize session state
 if "benchmark_engine" not in st.session_state:
     st.session_state.benchmark_engine = BenchmarkEngine()
 
@@ -52,7 +46,6 @@ if "dataset_generator" not in st.session_state:
 if "results" not in st.session_state:
     st.session_state.results = []
 
-# Initialize database
 db = BenchmarkDatabase()
 
 if "config_valid" not in st.session_state:
@@ -74,10 +67,8 @@ def get_location_display(result: BenchmarkResult = None, country: str = None, ci
     if not country or country == 'Unknown':
         return '🌍 Unknown'
     
-    # Get country flag
     flag = geo_service.get_country_flag(getattr(result, 'location_country', None) if result else None)
     
-    # Format location string
     if city and city != 'Unknown':
         return f"{flag} {city}, {country}"
     return f"{flag} {country}"
@@ -91,7 +82,6 @@ def check_configuration():
 def main():
     """Main application function"""
     
-    # NEW FEATURE ANNOUNCEMENT - Above header
     st.markdown("""
     <style>
     @keyframes catchyPulse {
@@ -174,42 +164,34 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Header
     st.title("TTS Benchmarking Tool")
     st.markdown("Compare Text-to-Speech providers with comprehensive metrics and analysis")
     
-    # Sidebar for navigation and configuration
     with st.sidebar:
-        # Navigation - moved to top
         default_page = "Quick Test"
         
         st.subheader("Navigator")
         
         pages = ["Leaderboard", "Quick Test", "Blind Test", "Streaming Race", "Batch Benchmark", "Results Analysis", "ROI Calculator"]
         
-        # Create navbar-style buttons
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
                 st.session_state.current_page = page_name
                 st.rerun()
         
-        # Set the current page - handle both old and new navigation systems
         if "navigate_to" in st.session_state and st.session_state.navigate_to:
             page = st.session_state.navigate_to
-            st.session_state.navigate_to = None  # Clear after using
+            st.session_state.navigate_to = None
         else:
             page = st.session_state.get("current_page", "Leaderboard")
         
         st.divider()
         
-        # Configuration
         st.subheader("Configuration")
         
-        # Check API configuration
         config_status = check_configuration()
         
         if config_status["valid"]:
-            # Show status for each provider
             for provider_id, status in config_status["providers"].items():
                 provider_name = TTS_PROVIDERS[provider_id].name
                 if status["configured"]:
@@ -226,7 +208,6 @@ def main():
                     st.code(f"export {env_var}=your_api_key_here")
                     st.caption(f"For {provider_name}")
     
-    # Main content based on selected page
     if page == "Quick Test":
         quick_test_page()
     elif page == "Blind Test":
@@ -248,18 +229,15 @@ def quick_test_page():
     st.header("🔥 Quick Test")
     st.markdown("Test a single text prompt across multiple TTS providers")
     
-    # Initialize session state for quick test results
     if "quick_test_results" not in st.session_state:
         st.session_state.quick_test_results = None
     
-    # Get configuration status
     config_status = check_configuration()
     
     if not st.session_state.config_valid:
         st.warning("Please configure at least one API key in the sidebar first.")
         return
     
-    # Get only configured providers
     configured_providers = [
         provider_id for provider_id, status in config_status["providers"].items() 
         if status["configured"]
@@ -269,7 +247,6 @@ def quick_test_page():
         st.error("No providers are configured. Please set API keys in the sidebar.")
         return
     
-    # Text input (full width)
     text_input = st.text_area(
         "Enter text to synthesize:",
         value="Just to confirm, the co-applicant's name is spelled M-A-R-I-S-A, correct? I'll need her consent before I can proceed with income verification.",
@@ -279,7 +256,6 @@ def quick_test_page():
     
     word_count = len(text_input.split())
     
-    # Provider selection - only show configured providers
     selected_providers = st.multiselect(
         "Select providers:",
         configured_providers,
@@ -287,12 +263,10 @@ def quick_test_page():
         help=f"Available providers: {', '.join([TTS_PROVIDERS[p].name for p in configured_providers])}"
     )
         
-    # Voice selection - display in rows of 4 columns
     voice_options = {}
     if selected_providers:
         st.markdown("**Voice Selection:**")
         
-        # Create rows of 4 columns each
         for i in range(0, len(selected_providers), 4):
             cols = st.columns(4)
             for j, provider in enumerate(selected_providers[i:i+4]):
@@ -304,10 +278,8 @@ def quick_test_page():
                         key=f"voice_{provider}"
                     )
         
-    # Test button
     if st.button("Generate & Compare", type="primary"):
         if text_input and selected_providers:
-            # Validate input with security checks
             valid, error_msg = session_manager.validate_request(text_input)
             if valid:
                 run_quick_test(text_input, selected_providers, voice_options)
@@ -316,7 +288,6 @@ def quick_test_page():
         else:
             st.warning("Please enter text and select at least one provider.")
     
-    # Display results BELOW the input section (outside button context)
     if st.session_state.quick_test_results is not None:
         st.markdown("---")  # Separator line
         display_quick_test_results(st.session_state.quick_test_results)
@@ -384,7 +355,6 @@ def display_quick_test_results(results: List[BenchmarkResult]):
     
     st.subheader("📊 Test Results")
     
-    # Create results table
     data = []
     for result in results:
         data.append({
@@ -401,14 +371,12 @@ def display_quick_test_results(results: List[BenchmarkResult]):
     df = pd.DataFrame(data)
     st.dataframe(df, use_container_width=True)
     
-    # Visualizations for successful results
     successful_results = [r for r in results if r.success]
     
     if len(successful_results) > 1:
         col1, col2 = st.columns(2)
         
         with col1:
-            # TTFB comparison
             fig_ttfb = px.bar(
                 x=[r.provider.title() for r in successful_results],
                 y=[r.ttfb for r in successful_results],
@@ -418,7 +386,6 @@ def display_quick_test_results(results: List[BenchmarkResult]):
             st.plotly_chart(fig_ttfb, use_container_width=True)
         
         with col2:
-            # File size comparison
             fig_size = px.bar(
                 x=[r.provider.title() for r in successful_results],
                 y=[r.file_size_bytes / 1024 for r in successful_results],
@@ -427,13 +394,11 @@ def display_quick_test_results(results: List[BenchmarkResult]):
             )
             st.plotly_chart(fig_size, use_container_width=True)
     
-    # Audio playback
     st.subheader("🎧 Audio Playback")
     
     if len(successful_results) >= 1:
         st.markdown("**Listen to the audio samples:**")
         
-        # Display audio players in rows of 4
         for i in range(0, len(successful_results), 4):
             cols = st.columns(4)
             for j, result in enumerate(successful_results[i:i+4]):
@@ -442,7 +407,6 @@ def display_quick_test_results(results: List[BenchmarkResult]):
                     st.caption(f"Model: {result.model_name}")
                     
                     if result.audio_data:
-                        # Custom audio player without download option in 3-dot menu
                         audio_base64 = base64.b64encode(result.audio_data).decode()
                         audio_html = f"""
                         <audio controls controlsList="nodownload" style="width: 100%;">
@@ -453,7 +417,6 @@ def display_quick_test_results(results: List[BenchmarkResult]):
                         st.caption(f"TTFB: {result.ttfb:.1f}ms")
                         st.caption(f"Size: {result.file_size_bytes/1024:.1f} KB")
                         
-                        # Download button for MP3
                         st.download_button(
                             label="Download MP3",
                             data=result.audio_data,
@@ -468,14 +431,12 @@ def blind_test_page():
     st.header("🎯 Blind Test")
     st.markdown("Compare TTS audio quality without knowing which provider generated each sample")
     
-    # Get configuration status
     config_status = check_configuration()
     
     if not st.session_state.config_valid:
         st.warning("Please configure at least one API key in the sidebar first.")
         return
     
-    # Get only configured providers
     configured_providers = [
         provider_id for provider_id, status in config_status["providers"].items() 
         if status["configured"]
@@ -485,7 +446,6 @@ def blind_test_page():
         st.warning("⚠️ Blind test requires at least 2 configured providers. Please configure more API keys.")
         return
     
-    # Initialize blind test state
     if "blind_test_samples" not in st.session_state:
         st.session_state.blind_test_samples = []
     
@@ -498,13 +458,11 @@ def blind_test_page():
     if "blind_test_vote_choice" not in st.session_state:
         st.session_state.blind_test_vote_choice = None
     
-    # Test setup section
-        st.subheader("⚙️ Test Setup")
+    st.subheader("⚙️ Test Setup")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Text input
         text_input = st.text_area(
             "Enter text to test:",
             value="The quick brown fox jumps over the lazy dog. This is a test of speech synthesis quality.",
@@ -524,10 +482,8 @@ def blind_test_page():
         5. Results revealed after voting
         """)
     
-    # Generate blind test samples
     if st.button("Generate Blind Test", type="primary"):
         if text_input and len(configured_providers) >= 2:
-            # Validate input
             valid, error_msg = session_manager.validate_request(text_input)
             if valid:
                 generate_blind_test_samples(text_input, configured_providers)
@@ -536,7 +492,6 @@ def blind_test_page():
         else:
             st.error("Please enter text. At least 2 providers must be configured.")
     
-    # Display blind test samples if available
     if st.session_state.blind_test_samples:
         display_blind_test_samples()
 
@@ -554,11 +509,9 @@ def generate_blind_test_samples(text: str, providers: List[str]):
         try:
             provider = TTSProviderFactory.create_provider(provider_id)
             
-            # Use first available voice for each provider
             voices = TTS_PROVIDERS[provider_id].supported_voices
             voice = voices[0] if voices else "default"
             
-            # Create test sample
             sample = TestSample(
                 id="blind_test",
                 text=text,
@@ -595,15 +548,12 @@ def generate_blind_test_samples(text: str, providers: List[str]):
         st.session_state.blind_test_samples = []
         return
     
-    # Randomize the order of samples
     random.shuffle(results)
     
-    # Assign anonymous labels (A, B, C, etc.) - dynamically generate based on number of results
-    labels = [chr(65 + i) for i in range(len(results))]  # Generates A, B, C, D, E, F, G, H, etc.
+    labels = [chr(65 + i) for i in range(len(results))]
     for i, result in enumerate(results):
         result.blind_label = labels[i]
     
-    # Store samples in session state
     st.session_state.blind_test_samples = results
     st.session_state.blind_test_voted = False
     st.session_state.blind_test_vote_choice = None
@@ -617,11 +567,9 @@ def display_blind_test_samples():
     samples = st.session_state.blind_test_samples
     
     if not st.session_state.blind_test_voted:
-        # Voting phase - don't reveal providers
         st.subheader("🎧 Listen and Vote")
         st.markdown("**Listen to each sample and vote for the one with the best quality:**")
         
-        # Display samples in rows of 4
         for i in range(0, len(samples), 4):
             cols = st.columns(4)
             for j, result in enumerate(samples[i:i+4]):
@@ -629,7 +577,6 @@ def display_blind_test_samples():
                     st.markdown(f"### Sample {result.blind_label}")
                     
                     if result.audio_data:
-                        # Custom audio player without download option in 3-dot menu
                         audio_base64 = base64.b64encode(result.audio_data).decode()
                         audio_html = f"""
                         <audio controls controlsList="nodownload" style="width: 100%;">
@@ -639,7 +586,6 @@ def display_blind_test_samples():
                         st.markdown(audio_html, unsafe_allow_html=True)
                         st.caption(f"Sample {result.blind_label}")
                         
-                        # Download button
                         st.download_button(
                             label="Download MP3",
                             data=result.audio_data,
@@ -650,7 +596,6 @@ def display_blind_test_samples():
         
         st.divider()
         
-        # Voting section
         st.markdown("### 🗳️ Cast Your Vote")
         
         vote_options = [f"Sample {r.blind_label}" for r in samples]
@@ -661,32 +606,24 @@ def display_blind_test_samples():
         )
         
         if st.button("Submit Vote", type="primary"):
-            # Record vote
-            selected_label = selected_sample.split()[1]  # Extract label (A, B, C, etc.)
+            selected_label = selected_sample.split()[1]
             st.session_state.blind_test_vote_choice = selected_label
             st.session_state.blind_test_voted = True
             
-            # Find the winning sample
             winner_result = next(r for r in samples if r.blind_label == selected_label)
             
-            # Update ELO ratings - winner beats all others (but only count as one vote)
-            # We'll update ELO ratings for all comparisons but only save one vote to database
             losers = [r for r in samples if r.blind_label != selected_label]
             if losers:
-                # Update ELO ratings for all comparisons
                 for loser_result in losers:
                     handle_blind_test_vote(winner_result, loser_result, save_vote=False)
                 
-                # Save only one vote to database
                 handle_blind_test_vote(winner_result, losers[0], save_vote=True)
             
             st.rerun()
     
     else:
-        # Results phase - reveal providers
         st.subheader("🎉 Results Revealed!")
         
-        # Show which sample the user voted for
         voted_sample = next(r for r in samples if r.blind_label == st.session_state.blind_test_vote_choice)
         
         st.success(f"**You voted for Sample {st.session_state.blind_test_vote_choice}**")
@@ -694,10 +631,8 @@ def display_blind_test_samples():
         
         st.divider()
         
-        # Show all samples with revealed providers
         st.subheader("🔓 All Samples Revealed")
         
-        # Create comparison table
         comparison_data = []
         for result in sorted(samples, key=lambda r: r.blind_label):
             is_winner = result.blind_label == st.session_state.blind_test_vote_choice
@@ -714,10 +649,8 @@ def display_blind_test_samples():
         df = pd.DataFrame(comparison_data)
         st.dataframe(df, use_container_width=True, hide_index=True)
         
-        # Show audio samples with labels
         st.subheader("🎧 Listen Again (with provider names)")
         
-        # Display audio players in rows of 4
         sorted_samples = sorted(samples, key=lambda r: r.blind_label)
         for i in range(0, len(sorted_samples), 4):
             cols = st.columns(4)
@@ -733,7 +666,6 @@ def display_blind_test_samples():
                     st.caption(result.model_name)
                     
                     if result.audio_data:
-                        # Custom audio player without download option in 3-dot menu
                         audio_base64 = base64.b64encode(result.audio_data).decode()
                         audio_html = f"""
                         <audio controls controlsList="nodownload" style="width: 100%;">
@@ -744,7 +676,6 @@ def display_blind_test_samples():
                         st.caption(f"TTFB: {result.ttfb:.1f}ms")
                         st.caption(f"Size: {result.file_size_bytes/1024:.1f} KB")
                         
-                        # Download button
                         st.download_button(
                             label="Download MP3",
                             data=result.audio_data,
@@ -755,7 +686,6 @@ def display_blind_test_samples():
         
         st.divider()
         
-        # Action buttons
     col1, col2 = st.columns(2)
         
     with col1:
@@ -767,7 +697,6 @@ def display_blind_test_samples():
         
     with col2:
             if st.button("View Leaderboard", use_container_width=True):
-                # Navigate to leaderboard by setting session state
                 st.session_state.current_page = "Leaderboard"
                 st.rerun()
 
@@ -777,16 +706,13 @@ def handle_blind_test_vote(winner_result: BenchmarkResult, loser_result: Benchma
     from database import db
     
     try:
-        # Get current ratings
         winner_rating_before = db.get_elo_rating(winner_result.provider)
         loser_rating_before = db.get_elo_rating(loser_result.provider)
         
-        # Update ratings
         new_winner_rating, new_loser_rating = db.update_elo_ratings(
             winner_result.provider, loser_result.provider, k_factor=32
         )
         
-        # Save the vote in database only if requested
         if save_vote:
             db.save_user_vote(
                 winner_result.provider, 
@@ -804,14 +730,12 @@ def streaming_race_page():
     st.header("⚡ Streaming Race")
     st.markdown("Watch TTS providers race in real-time! See Time to First Byte (TTFB) for each provider.")
     
-    # Get configuration status
     config_status = check_configuration()
     
     if not st.session_state.config_valid:
         st.warning("Please configure at least one API key in the sidebar first.")
         return
     
-    # Get only configured providers
     configured_providers = [
         provider_id for provider_id, status in config_status["providers"].items() 
         if status["configured"]
@@ -821,14 +745,12 @@ def streaming_race_page():
         st.warning("⚠️ Streaming race requires at least 2 configured providers.")
         return
     
-    # Initialize session state for race
     if "race_running" not in st.session_state:
         st.session_state.race_running = False
     
     if "race_results" not in st.session_state:
         st.session_state.race_results = None
     
-    # Configuration section
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -852,14 +774,11 @@ def streaming_race_page():
         5. See TTFB and Latencies
         """)
     
-    # Provider selection
-    # Default to murf_falcon_oct23 and deepgram_aura2 if available
     default_race_providers = []
     if "murf_falcon_oct23" in configured_providers:
         default_race_providers.append("murf_falcon_oct23")
     if "deepgram_aura2" in configured_providers:
         default_race_providers.append("deepgram_aura2")
-    # If those aren't available, fall back to first 2 configured providers
     if len(default_race_providers) < 2:
         default_race_providers = configured_providers[:min(2, len(configured_providers))]
     
@@ -870,10 +789,8 @@ def streaming_race_page():
         help="Select 2-6 providers for the race"
     )
     
-    # Start race button
     if st.button("START RACE", type="primary", disabled=len(selected_providers) < 2):
         if text_input and len(selected_providers) >= 2:
-            # Validate input
             valid, error_msg = session_manager.validate_request(text_input)
             if valid:
                 st.session_state.race_running = True
@@ -883,7 +800,6 @@ def streaming_race_page():
         else:
             st.warning("Please enter text and select at least 2 providers.")
     
-    # Display race results if available
     if st.session_state.race_results is not None:
         display_race_results(st.session_state.race_results)
 
@@ -893,7 +809,6 @@ def run_streaming_race(text: str, providers: List[str]):
     st.markdown("---")
     st.subheader("🏁 Race in Progress...")
     
-    # Create placeholders for each provider
     race_placeholders = {}
     status_placeholders = {}
     
@@ -905,7 +820,6 @@ def run_streaming_race(text: str, providers: List[str]):
         with col2:
             status_placeholders[provider_id] = st.empty()
     
-    # Results storage
     race_results = {}
     
     async def race_provider(provider_id: str):
@@ -913,11 +827,9 @@ def run_streaming_race(text: str, providers: List[str]):
         try:
             provider = TTSProviderFactory.create_provider(provider_id)
             
-            # Get first available voice
             voices = TTS_PROVIDERS[provider_id].supported_voices
             voice = voices[0] if voices else "default"
             
-            # Create test sample
             sample = TestSample(
                 id="streaming_race",
                 text=text,
@@ -927,16 +839,13 @@ def run_streaming_race(text: str, providers: List[str]):
                 complexity_score=0.5
             )
             
-            # Show initial ping status
             status_placeholders[provider_id].text(f"Starting...")
             
-            # Use benchmark engine to run test (saves to database automatically)
             benchmark_result = await st.session_state.benchmark_engine.run_single_test(
                 provider, sample, voice, iteration=1
             )
             
             if benchmark_result.success:
-                # Simulate streaming progress visualization
                 progress_steps = 20
                 for step in range(progress_steps + 1):
                     progress = step / progress_steps
@@ -952,7 +861,7 @@ def run_streaming_race(text: str, providers: List[str]):
                     else:
                         status_placeholders[provider_id].text(f"✅ Done: {benchmark_result.ttfb:.0f}ms")
                     
-                    await asyncio.sleep(benchmark_result.latency_ms / progress_steps / 1000)  # Sleep in seconds
+                    await asyncio.sleep(benchmark_result.latency_ms / progress_steps / 1000)
                 
                 race_results[provider_id] = {
                     'success': True,
@@ -980,33 +889,26 @@ def run_streaming_race(text: str, providers: List[str]):
                 'error': str(e)
             }
     
-    # Run all providers concurrently
     async def race_all():
         tasks = [race_provider(provider_id) for provider_id in providers]
         await asyncio.gather(*tasks)
     
-    # Execute the race
     asyncio.run(race_all())
     
-    # Store results
     st.session_state.race_results = race_results
     st.session_state.race_running = False
     
-    # Update ELO ratings based on TTFB (fastest TTFB wins)
     successful_races = {k: v for k, v in race_results.items() if v.get('success')}
     if len(successful_races) >= 2:
-        # Sort by TTFB
         sorted_by_ttfb = sorted(successful_races.items(), key=lambda x: x[1]['ttfb'])
         
-        # Winner has lowest TTFB, update ratings against all others
         winner_provider = sorted_by_ttfb[0][0]
         for loser_provider, _ in sorted_by_ttfb[1:]:
             try:
                 db.update_elo_ratings(winner_provider, loser_provider, k_factor=32)
             except:
-                pass  # Ignore ELO update errors
+                pass
     
-    # Small delay to show final state
     import time as time_module
     time_module.sleep(0.5)
     
@@ -1018,27 +920,22 @@ def display_race_results(race_results: Dict[str, Any]):
     st.markdown("---")
     st.subheader("🏆 Race Results")
     
-    # Filter successful results
     successful_results = {k: v for k, v in race_results.items() if v.get('success')}
     
     if not successful_results:
         st.error("❌ No providers completed successfully.")
         return
     
-    # Find winner (fastest TTFB)
     winner = min(successful_results.items(), key=lambda x: x[1]['ttfb'])
     winner_provider = winner[0]
     winner_data = winner[1]
     
-    # Winner announcement
     st.success(f"**WINNER: {winner_provider.replace('_', ' ').title()}** - TTFB: {winner_data['ttfb']:.0f}ms")
     
-    # Results table
     st.markdown("### 📊 Detailed Results")
     
     results_data = []
     for provider, data in sorted(successful_results.items(), key=lambda x: x[1]['ttfb']):
-        # Calculate speed (chars per second)
         text_length = len(data.get('text', ''))
         speed = (text_length / (data['total_time'] / 1000)) if data['total_time'] > 0 else 0
         
@@ -1054,11 +951,9 @@ def display_race_results(race_results: Dict[str, Any]):
     df = pd.DataFrame(results_data)
     st.dataframe(df, use_container_width=True, hide_index=True)
     
-    # Visualizations
     col1, col2 = st.columns(2)
     
     with col1:
-        # TTFB comparison
         fig_ttfb = px.bar(
             x=[r['Provider'] for r in results_data],
             y=[float(r['TTFB (ms)']) for r in results_data],
@@ -1071,7 +966,6 @@ def display_race_results(race_results: Dict[str, Any]):
         st.plotly_chart(fig_ttfb, use_container_width=True)
     
     with col2:
-        # File Size comparison
         fig_size = px.bar(
             x=[r['Provider'] for r in results_data],
             y=[float(r['File Size (KB)']) for r in results_data],
@@ -1083,14 +977,11 @@ def display_race_results(race_results: Dict[str, Any]):
         fig_size.update_layout(showlegend=False)
         st.plotly_chart(fig_size, use_container_width=True)
     
-    # Audio playback
     st.subheader("🎧 Audio Samples")
     
-    # Display audio players
     audio_cols = st.columns(min(4, len(successful_results)))
     for idx, (provider, data) in enumerate(sorted(successful_results.items(), key=lambda x: x[1]['ttfb'])):
         with audio_cols[idx % 4]:
-            # Show medals for top 3, plain text for others
             if provider == winner_provider:
                 st.markdown(f"**🥇 {provider.replace('_', ' ').title()}**")
             elif idx == 1:
@@ -1110,7 +1001,6 @@ def display_race_results(race_results: Dict[str, Any]):
                 """
                 st.markdown(audio_html, unsafe_allow_html=True)
                 
-                # Download button
                 st.download_button(
                     label="Download MP3",
                     data=data['audio_data'],
@@ -1119,7 +1009,6 @@ def display_race_results(race_results: Dict[str, Any]):
                     key=f"download_race_{provider}"
                 )
     
-    # Race again button
     st.markdown("---")
     if st.button("Race Again", type="primary", use_container_width=True):
         st.session_state.race_results = None
@@ -1131,14 +1020,12 @@ def batch_benchmark_page():
     st.header("⚙️ Batch Benchmark")
     st.markdown("Run comprehensive benchmarks across multiple samples and providers")
     
-    # Get configuration status
     config_status = check_configuration()
     
     if not st.session_state.config_valid:
         st.warning("Please configure at least one API key in the sidebar first.")
         return
     
-    # Get only configured providers
     configured_providers = [
         provider_id for provider_id, status in config_status["providers"].items() 
         if status["configured"]
@@ -1153,7 +1040,6 @@ def batch_benchmark_page():
     with col1:
         st.subheader("Test Configuration")
         
-        # Provider selection - only show configured providers
         selected_providers = st.multiselect(
             "Select providers:",
             configured_providers,
@@ -1161,10 +1047,8 @@ def batch_benchmark_page():
             help=f"Available providers: {', '.join([TTS_PROVIDERS[p].name for p in configured_providers])}"
         )
         
-        # Sample selection
         sample_count = st.slider("Number of samples:", 5, 50, 20)
         
-        # Category filter
         categories = ["news", "literature", "conversation", "technical", "narrative"]
         selected_categories = st.multiselect(
             "Categories:",
@@ -1172,7 +1056,6 @@ def batch_benchmark_page():
             default=categories
         )
         
-        # Length categories
         length_categories = ["short", "medium", "long", "very_long"]
         selected_lengths = st.multiselect(
             "Length categories:",
@@ -1195,10 +1078,8 @@ def batch_benchmark_page():
                 key=f"batch_voices_{provider}"
             )
     
-    # Run benchmark button
     if st.button("Run Benchmark", type="primary"):
         if selected_providers:
-            # Generate test samples automatically
             prepare_test_dataset(sample_count, selected_categories, selected_lengths)
             run_batch_benchmark(selected_providers, voice_config, iterations)
         else:
@@ -1210,17 +1091,14 @@ def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List
     with st.spinner("Preparing test dataset..."):
         final_samples = []
         
-        # Generate more samples to ensure we have enough after filtering
         all_samples = st.session_state.dataset_generator.generate_dataset(sample_count * 4)
             
-        # Filter samples that match criteria
         matching_samples = []
         for sample in all_samples:
             if (sample.category in categories and 
                 sample.length_category in lengths):
                 matching_samples.append(sample)
         
-        # If we don't have enough matching samples, generate more
         attempts = 0
         while len(matching_samples) < sample_count and attempts < 3:
             additional_samples = st.session_state.dataset_generator.generate_dataset(sample_count * 2)
@@ -1231,7 +1109,6 @@ def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List
                     matching_samples.append(sample)
             attempts += 1
         
-        # Take the requested number of samples
         final_samples = matching_samples[:sample_count]
         
         st.session_state.test_samples = final_samples
@@ -1239,7 +1116,6 @@ def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List
     if final_samples:
         st.success(f"Prepared {len(final_samples)} test samples")
         
-        # Display sample statistics
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -1262,7 +1138,6 @@ def run_batch_benchmark(providers: List[str], voice_config: Dict[str, List[str]]
     
     samples = st.session_state.get("test_samples", [])
     
-    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
     
@@ -1271,7 +1146,6 @@ def run_batch_benchmark(providers: List[str], voice_config: Dict[str, List[str]]
         progress_bar.progress(progress)
         status_text.text(f"Progress: {completed}/{total} tests completed ({progress*100:.1f}%)")
     
-    # Run benchmark
     with st.spinner("Running benchmark..."):
         results = asyncio.run(
             st.session_state.benchmark_engine.run_benchmark_suite(
@@ -1285,12 +1159,10 @@ def run_batch_benchmark(providers: List[str], voice_config: Dict[str, List[str]]
     
     st.session_state.results.extend(results)
     
-    # Update ELO ratings
     st.session_state.benchmark_engine.update_elo_ratings(results)
     
     st.success(f"Benchmark completed! {len(results)} tests run.")
     
-    # Display summary
     display_benchmark_summary(results)
 
 def display_benchmark_summary(results: List[BenchmarkResult]):
@@ -1298,14 +1170,10 @@ def display_benchmark_summary(results: List[BenchmarkResult]):
     
     st.subheader("📊 Benchmark Summary")
     
-    # Calculate summary statistics
     summaries = st.session_state.benchmark_engine.calculate_summary_stats(results)
     
-    # Create summary table with model names
-    # Get current location for display
     current_location = geo_service.get_location_string()
     
-    # Calculate TTFB averages per provider
     ttfb_by_provider = {}
     for result in results:
         if result.success and result.ttfb > 0:
@@ -1336,14 +1204,12 @@ def results_analysis_page():
     st.header("📈 Results Analysis")
     st.markdown("Analyze benchmark results with detailed metrics and comparisons")
     
-    # Load results from database instead of session state
     db_results = db.get_recent_results(limit=1000)
     
     if db_results.empty:
         st.info("No benchmark results available. Run a benchmark first.")
         return
     
-    # Convert database results to BenchmarkResult objects
     results = []
     for _, row in db_results.iterrows():
         result = BenchmarkResult(
@@ -1366,7 +1232,6 @@ def results_analysis_page():
         )
         results.append(result)
     
-    # Filter controls
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -1380,7 +1245,6 @@ def results_analysis_page():
     with col3:
         success_filter = st.selectbox("Success filter:", ["All", "Successful only", "Failed only"])
     
-    # Filter results
     filtered_results = results
     
     if selected_providers:
@@ -1398,7 +1262,6 @@ def results_analysis_page():
         st.warning("No results match the selected filters.")
         return
     
-    # Display visualizations
     display_analysis_charts(filtered_results)
 
 def display_analysis_charts(results: List[BenchmarkResult]):
@@ -1410,9 +1273,7 @@ def display_analysis_charts(results: List[BenchmarkResult]):
         st.warning("No successful results to analyze.")
         return
     
-    # TTFB distribution
     st.subheader("⏰ TTFB Distribution")
-    # Create TTFB distribution instead of latency
     ttfb_data = []
     for result in successful_results:
         if result.success and result.ttfb > 0:
@@ -1436,13 +1297,9 @@ def display_analysis_charts(results: List[BenchmarkResult]):
         fig_ttfb.update_layout(height=400, showlegend=False)
         st.plotly_chart(fig_ttfb, use_container_width=True)
     
-    # Success rate by provider
     st.subheader("✅ Success Rate Analysis")
     fig_success = visualizations.create_success_rate_chart(results)
     st.plotly_chart(fig_success, use_container_width=True)
-    
-    # Performance by category
-    # Category performance section removed - focusing on TTFB metrics
 
 def leaderboard_page():
     """ELO leaderboard page with persistent data"""
@@ -1450,39 +1307,32 @@ def leaderboard_page():
     st.header("🏆 Leaderboard")
     st.markdown("ELO-based rankings of TTS providers")
     
-    # Get persistent leaderboard data
     leaderboard = st.session_state.benchmark_engine.get_leaderboard()
     
     if not leaderboard:
         st.info("No leaderboard data available. Run benchmarks to generate rankings.")
         return
     
-    # Display leaderboard chart
     try:
         fig_leaderboard = visualizations.create_leaderboard_chart(leaderboard)
         st.plotly_chart(fig_leaderboard, use_container_width=True)
     except:
-        # Fallback if visualization fails
         pass
     
-    # Enhanced leaderboard table with TTFB stats
     st.subheader("📊 Current Rankings")
     
-    # Get TTFB statistics for each provider
     from database import db
     try:
         ttfb_stats = db.get_ttfb_stats_by_provider()
     except Exception:
-        ttfb_stats = {}  # Gracefully handle if TTFB column doesn't exist yet
+        ttfb_stats = {}
     
-    # Get current location for display
     current_location = geo_service.get_location_string()
     location_display = f"{geo_service.get_country_flag()} {current_location}"
     
     df_leaderboard = pd.DataFrame(leaderboard)
     df_leaderboard["Provider"] = df_leaderboard["provider"].str.title()
     
-    # Add model names, location, and TTFB stats
     df_leaderboard["Model"] = df_leaderboard["provider"].apply(get_model_name)
     df_leaderboard["Location"] = location_display
     df_leaderboard["Avg TTFB (ms)"] = df_leaderboard["provider"].apply(
@@ -1492,7 +1342,6 @@ def leaderboard_page():
         lambda p: f"{ttfb_stats.get(p, {}).get('p95_ttfb', 0):.1f}"
     )
     
-    # Format the display columns
     display_df = df_leaderboard[[
         "rank", "Provider", "Model", "Location", "elo_rating", "Avg TTFB (ms)", "P95 TTFB (ms)",
         "games_played", "wins", "losses", "win_rate"
@@ -1505,10 +1354,8 @@ def leaderboard_page():
     
     st.dataframe(display_df, use_container_width=True, hide_index=True)
     
-    # Provider statistics
     st.subheader("📈 Provider Statistics")
     
-    # Import database to get provider stats
     from database import db
     provider_stats = db.get_provider_stats()
     
@@ -1529,14 +1376,12 @@ def leaderboard_page():
         stats_df = pd.DataFrame(stats_data)
         st.dataframe(stats_df, use_container_width=True, hide_index=True)
     
-    # User voting statistics
     st.subheader("🗳️ User Voting Statistics")
     vote_stats = db.get_vote_statistics()
     
     if vote_stats['total_votes'] > 0:
         st.metric("Total User Votes", vote_stats['total_votes'])
         
-        # Show vote wins per provider
         if vote_stats['wins']:
             vote_data = []
             location_display = f"{geo_service.get_country_flag()} {geo_service.get_location_string()}"
@@ -1565,7 +1410,6 @@ def roi_calculator_page():
     st.header("💰 ROI Calculator")
     st.markdown("Calculate the return on investment for different TTS providers based on your usage patterns.")
     
-    # Create the ROI calculator HTML with embedded scripts
     roi_calculator_html = '''
     <div id="tts-tool"></div>
     <script src="https://cdn.jsdelivr.net/gh/ShreyashCJ/roi_calculator/3.js"></script>
@@ -1583,14 +1427,11 @@ def roi_calculator_page():
     </script>
     '''
     
-    # Use Streamlit components to render the HTML with increased height
     components.html(roi_calculator_html, height=1400, scrolling=False)
     
-    # Add some additional information below the calculator with proper spacing
     st.markdown("---")
     st.markdown("### 💡 Tips for Using the ROI Calculator")
     
-    # Add bottom margin for better spacing
     st.markdown('<div style="margin-bottom: 2rem;"></div>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
@@ -1619,7 +1460,6 @@ def roi_calculator_page():
         - Fine-tune your usage patterns for accurate calculations
         """)
     
-    # Add extra bottom margin
     st.markdown('<div style="margin-bottom: 3rem;"></div>', unsafe_allow_html=True)
 
 

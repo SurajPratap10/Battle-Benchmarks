@@ -22,7 +22,6 @@ class BenchmarkDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Create benchmark results table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS benchmark_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +43,6 @@ class BenchmarkDatabase:
             )
         ''')
         
-        # Add geolocation columns if they don't exist (for existing databases)
         try:
             cursor.execute('ALTER TABLE benchmark_results ADD COLUMN location_country TEXT')
         except:
@@ -58,19 +56,16 @@ class BenchmarkDatabase:
         except:
             pass
         
-        # Add latency_1 column for network latency (pure network RTT without TTS processing)
         try:
             cursor.execute('ALTER TABLE benchmark_results ADD COLUMN latency_1 REAL DEFAULT 0')
         except:
             pass
         
-        # Add ttfb column for Time to First Byte
         try:
             cursor.execute('ALTER TABLE benchmark_results ADD COLUMN ttfb REAL DEFAULT 0')
         except:
             pass
         
-        # Create ELO ratings table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS elo_ratings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +78,6 @@ class BenchmarkDatabase:
             )
         ''')
         
-        # Create provider statistics table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS provider_stats (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,7 +90,6 @@ class BenchmarkDatabase:
             )
         ''')
         
-        # Create test sessions table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS test_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,7 +102,6 @@ class BenchmarkDatabase:
             )
         ''')
         
-        # Create user votes table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_votes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,7 +152,6 @@ class BenchmarkDatabase:
         conn.commit()
         conn.close()
         
-        # Update provider statistics
         self.update_provider_stats(result.provider, result)
     
     def update_provider_stats(self, provider: str, result):
@@ -168,16 +159,13 @@ class BenchmarkDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get current stats
         cursor.execute('SELECT * FROM provider_stats WHERE provider = ?', (provider,))
         stats = cursor.fetchone()
         
         if stats:
-            # Update existing stats
             total_tests = stats[2] + 1
             successful_tests = stats[3] + (1 if result.success else 0)
             
-            # Calculate new averages
             if result.success:
                 old_avg_latency = stats[4]
                 old_avg_file_size = stats[5]
@@ -195,7 +183,6 @@ class BenchmarkDatabase:
                 WHERE provider = ?
             ''', (total_tests, successful_tests, new_avg_latency, new_avg_file_size, datetime.now(), provider))
         else:
-            # Create new stats entry
             cursor.execute('''
                 INSERT INTO provider_stats 
                 (provider, total_tests, successful_tests, avg_latency, avg_file_size, last_updated)
@@ -223,7 +210,6 @@ class BenchmarkDatabase:
         if result:
             return result[0]
         else:
-            # Initialize new provider with default rating
             self.init_elo_rating(provider)
             return 1500.0
     
@@ -246,26 +232,21 @@ class BenchmarkDatabase:
         winner_rating = self.get_elo_rating(winner)
         loser_rating = self.get_elo_rating(loser)
         
-        # Calculate expected scores
         expected_winner = 1 / (1 + 10**((loser_rating - winner_rating) / 400))
         expected_loser = 1 / (1 + 10**((winner_rating - loser_rating) / 400))
         
-        # Update ratings
         new_winner_rating = winner_rating + k_factor * (1 - expected_winner)
         new_loser_rating = loser_rating + k_factor * (0 - expected_loser)
         
-        # Save updated ratings
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Update winner
         cursor.execute('''
             UPDATE elo_ratings 
             SET rating = ?, games_played = games_played + 1, wins = wins + 1, last_updated = ?
             WHERE provider = ?
         ''', (new_winner_rating, datetime.now(), winner))
         
-        # Update loser
         cursor.execute('''
             UPDATE elo_ratings 
             SET rating = ?, games_played = games_played + 1, losses = losses + 1, last_updated = ?
@@ -441,7 +422,6 @@ class BenchmarkDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get all successful results grouped by provider
         cursor.execute('''
             SELECT provider, latency_ms 
             FROM benchmark_results 
@@ -451,14 +431,12 @@ class BenchmarkDatabase:
         results = cursor.fetchall()
         conn.close()
         
-        # Group by provider and calculate statistics
         provider_latencies = {}
         for provider, latency in results:
             if provider not in provider_latencies:
                 provider_latencies[provider] = []
             provider_latencies[provider].append(latency)
         
-        # Calculate statistics for each provider
         stats = {}
         for provider, latencies in provider_latencies.items():
             if not latencies:
@@ -467,7 +445,6 @@ class BenchmarkDatabase:
             latencies_sorted = sorted(latencies)
             n = len(latencies_sorted)
             
-            # Calculate percentiles
             def percentile(data, p):
                 if not data:
                     return 0
@@ -497,7 +474,6 @@ class BenchmarkDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get all successful results with ping data grouped by provider
         cursor.execute('''
             SELECT provider, latency_1 
             FROM benchmark_results 
@@ -507,14 +483,12 @@ class BenchmarkDatabase:
         results = cursor.fetchall()
         conn.close()
         
-        # Group by provider and calculate statistics
         provider_pings = {}
         for provider, ping in results:
             if provider not in provider_pings:
                 provider_pings[provider] = []
             provider_pings[provider].append(ping)
         
-        # Calculate statistics for each provider
         stats = {}
         for provider, pings in provider_pings.items():
             if not pings:
@@ -523,7 +497,6 @@ class BenchmarkDatabase:
             pings_sorted = sorted(pings)
             n = len(pings_sorted)
             
-            # Calculate percentiles
             def percentile(data, p):
                 if not data:
                     return 0
@@ -553,7 +526,6 @@ class BenchmarkDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get all successful results with TTFB data grouped by provider
         cursor.execute('''
             SELECT provider, ttfb 
             FROM benchmark_results 
@@ -563,14 +535,12 @@ class BenchmarkDatabase:
         results = cursor.fetchall()
         conn.close()
         
-        # Group by provider and calculate statistics
         provider_ttfbs = {}
         for provider, ttfb in results:
             if provider not in provider_ttfbs:
                 provider_ttfbs[provider] = []
             provider_ttfbs[provider].append(ttfb)
         
-        # Calculate statistics for each provider
         stats = {}
         for provider, ttfbs in provider_ttfbs.items():
             if not ttfbs:
@@ -579,7 +549,6 @@ class BenchmarkDatabase:
             ttfbs_sorted = sorted(ttfbs)
             n = len(ttfbs_sorted)
             
-            # Calculate percentiles
             def percentile(data, p):
                 if not data:
                     return 0
@@ -604,5 +573,4 @@ class BenchmarkDatabase:
         
         return stats
 
-# Global database instance
 db = BenchmarkDatabase()

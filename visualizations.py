@@ -12,7 +12,6 @@ from benchmarking_engine import BenchmarkResult
 def create_latency_distribution(results: List[BenchmarkResult]) -> go.Figure:
     """Create latency distribution chart"""
     
-    # Prepare data
     data = []
     for result in results:
         if result.success:
@@ -28,7 +27,6 @@ def create_latency_distribution(results: List[BenchmarkResult]) -> go.Figure:
     if df.empty:
         return go.Figure().add_annotation(text="No data available", x=0.5, y=0.5)
     
-    # Create box plot
     fig = px.box(
         df,
         x="provider",
@@ -51,7 +49,6 @@ def create_latency_distribution(results: List[BenchmarkResult]) -> go.Figure:
 def create_success_rate_chart(results: List[BenchmarkResult]) -> go.Figure:
     """Create success rate chart"""
     
-    # Calculate success rates
     provider_stats = {}
     for result in results:
         if result.provider not in provider_stats:
@@ -61,7 +58,6 @@ def create_success_rate_chart(results: List[BenchmarkResult]) -> go.Figure:
         if result.success:
             provider_stats[result.provider]["successful"] += 1
     
-    # Prepare data
     providers = []
     success_rates = []
     total_tests = []
@@ -72,7 +68,6 @@ def create_success_rate_chart(results: List[BenchmarkResult]) -> go.Figure:
         success_rates.append(success_rate)
         total_tests.append(stats["total"])
     
-    # Create bar chart
     fig = go.Figure(data=[
         go.Bar(
             x=providers,
@@ -102,15 +97,12 @@ def create_leaderboard_chart(leaderboard: List[Dict[str, Any]]) -> go.Figure:
     ratings = [item["elo_rating"] for item in leaderboard]
     ranks = [item["rank"] for item in leaderboard]
     
-    # Create color scheme - use Viridis for most, distinct colors for bottom 4
     num_providers = len(providers)
     colors = list(px.colors.sequential.Viridis[:max(1, num_providers - 4)])
     
-    # Add distinct colors for bottom 4 bars
-    bottom_colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3']  # Red, Teal, Yellow, Light Teal
+    bottom_colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3']
     colors.extend(bottom_colors[:min(4, num_providers)])
     
-    # Create horizontal bar chart
     fig = go.Figure(data=[
         go.Bar(
             y=providers,
@@ -140,8 +132,7 @@ def create_latency_vs_quality_scatter(results: List[BenchmarkResult]) -> go.Figu
     data = []
     for result in results:
         if result.success:
-            # Use file size as a proxy for quality (larger files often mean higher quality)
-            quality_score = result.file_size_bytes / 1024  # KB
+            quality_score = result.file_size_bytes / 1024
             
             data.append({
                 "provider": result.provider.title(),
@@ -178,7 +169,6 @@ def create_latency_vs_quality_scatter(results: List[BenchmarkResult]) -> go.Figu
 def create_performance_heatmap(results: List[BenchmarkResult]) -> go.Figure:
     """Create performance heatmap by category and provider"""
     
-    # Prepare data
     performance_data = {}
     
     for result in results:
@@ -194,7 +184,6 @@ def create_performance_heatmap(results: List[BenchmarkResult]) -> go.Figure:
             
             performance_data[provider][category].append(result.latency_ms)
     
-    # Calculate average latencies
     providers = list(performance_data.keys())
     categories = list(set(cat for provider_data in performance_data.values() for cat in provider_data.keys()))
     
@@ -230,7 +219,6 @@ def create_performance_heatmap(results: List[BenchmarkResult]) -> go.Figure:
 def create_latency_timeline(results: List[BenchmarkResult]) -> go.Figure:
     """Create latency timeline chart"""
     
-    # Convert timestamps and prepare data
     data = []
     for result in results:
         if result.success:
@@ -265,13 +253,12 @@ def create_latency_timeline(results: List[BenchmarkResult]) -> go.Figure:
 def create_error_analysis_chart(results: List[BenchmarkResult]) -> go.Figure:
     """Create error analysis chart"""
     
-    # Count errors by provider and type
     error_data = {}
     
     for result in results:
         if not result.success and result.error_message:
             provider = result.provider.title()
-            error_type = result.error_message.split(':')[0]  # Get error type
+            error_type = result.error_message.split(':')[0]
             
             if provider not in error_data:
                 error_data[provider] = {}
@@ -281,7 +268,6 @@ def create_error_analysis_chart(results: List[BenchmarkResult]) -> go.Figure:
     if not error_data:
         return go.Figure().add_annotation(text="No errors to analyze", x=0.5, y=0.5)
     
-    # Prepare data for stacked bar chart
     providers = list(error_data.keys())
     error_types = list(set(error_type for provider_errors in error_data.values() for error_type in provider_errors.keys()))
     
@@ -345,7 +331,6 @@ def create_word_count_performance(results: List[BenchmarkResult]) -> go.Figure:
 def create_summary_dashboard(results: List[BenchmarkResult]) -> go.Figure:
     """Create comprehensive summary dashboard"""
     
-    # Create subplots
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=("Success Rate", "Avg Latency", "File Size Distribution", "Error Count"),
@@ -353,7 +338,6 @@ def create_summary_dashboard(results: List[BenchmarkResult]) -> go.Figure:
                [{"type": "box"}, {"type": "bar"}]]
     )
     
-    # Calculate metrics by provider
     provider_metrics = {}
     
     for result in results:
@@ -374,21 +358,18 @@ def create_summary_dashboard(results: List[BenchmarkResult]) -> go.Figure:
     
     providers = list(provider_metrics.keys())
     
-    # Success rate (subplot 1,1)
     success_rates = [(metrics["successful"] / metrics["total"]) * 100 for metrics in provider_metrics.values()]
     fig.add_trace(
         go.Bar(x=providers, y=success_rates, name="Success Rate", showlegend=False),
         row=1, col=1
     )
     
-    # Average latency (subplot 1,2)
     avg_latencies = [np.mean(metrics["latencies"]) if metrics["latencies"] else 0 for metrics in provider_metrics.values()]
     fig.add_trace(
         go.Bar(x=providers, y=avg_latencies, name="Avg Latency", showlegend=False),
         row=1, col=2
     )
     
-    # File size distribution (subplot 2,1)
     for i, provider in enumerate(providers):
         if provider_metrics[provider]["file_sizes"]:
             fig.add_trace(
@@ -396,7 +377,6 @@ def create_summary_dashboard(results: List[BenchmarkResult]) -> go.Figure:
                 row=2, col=1
             )
     
-    # Error count (subplot 2,2)
     error_counts = [metrics["errors"] for metrics in provider_metrics.values()]
     fig.add_trace(
         go.Bar(x=providers, y=error_counts, name="Errors", showlegend=False),

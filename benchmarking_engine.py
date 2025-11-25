@@ -75,7 +75,6 @@ class BenchmarkEngine:
         self.dataset_generator = DatasetGenerator()
         self.results: List[BenchmarkResult] = []
         
-        # Initialize ELO ratings in database
         for provider_id in self.providers.keys():
             db.init_elo_rating(provider_id, BENCHMARK_CONFIG["initial_elo_rating"])
     
@@ -89,7 +88,6 @@ class BenchmarkEngine:
     ) -> BenchmarkResult:
         """Run a single TTS test"""
         
-        # Measure network latency (pure RTT without TTS processing)
         ping_latency = await provider.measure_ping_latency()
         
         request = TTSRequest(
@@ -99,26 +97,19 @@ class BenchmarkEngine:
             model=model
         )
         
-        # Generate speech
         result = await provider.generate_speech(request)
         
-        # Calculate TTFB (Time to First Byte)
-        # TTFB = network latency + server processing time to start sending data
-        # Estimate: TTFB ≈ ping + (10-20% of total processing time)
         ttfb_value = 0.0
         if result.success and result.latency_ms > 0:
             processing_time = result.latency_ms - ping_latency
-            estimated_ttfb = ping_latency + (processing_time * 0.15)  # 15% of processing for first byte
-            ttfb_value = max(ping_latency + 10, estimated_ttfb)  # At least ping + 10ms
+            estimated_ttfb = ping_latency + (processing_time * 0.15)
+            ttfb_value = max(ping_latency + 10, estimated_ttfb)
         
-        # Get model name from config
         from config import TTS_PROVIDERS
         model_name = TTS_PROVIDERS.get(provider.provider_id).model_name if provider.provider_id in TTS_PROVIDERS else provider.provider_id
         
-        # Get geolocation
         location = geo_service.get_location()
         
-        # Create benchmark result
         benchmark_result = BenchmarkResult(
             test_id=f"{provider.provider_id}_{sample.id}_{iteration}",
             provider=provider.provider_id,
@@ -148,7 +139,6 @@ class BenchmarkEngine:
             ttfb=ttfb_value
         )
         
-        # Save to database
         try:
             db.save_benchmark_result(benchmark_result)
         except Exception as e:
@@ -191,7 +181,6 @@ class BenchmarkEngine:
                             if progress_callback:
                                 progress_callback(completed_tests, total_tests)
                             
-                            # Small delay to avoid rate limiting
                             await asyncio.sleep(0.1)
                             
                         except Exception as e:
@@ -223,7 +212,6 @@ class BenchmarkEngine:
         
         summaries = {}
         
-        # Group results by provider
         provider_results = {}
         for result in results:
             if result.provider not in provider_results:
@@ -236,15 +224,13 @@ class BenchmarkEngine:
             if not provider_results_list:
                 continue
             
-            # Calculate latency statistics
             latencies = [r.latency_ms for r in successful_results] if successful_results else [0]
             file_sizes = [r.file_size_bytes for r in successful_results] if successful_results else [0]
             
-            # Error analysis
             error_types = {}
             for result in provider_results_list:
                 if not result.success and result.error_message:
-                    error_type = result.error_message.split(':')[0]  # Get error type
+                    error_type = result.error_message.split(':')[0]
                     error_types[error_type] = error_types.get(error_type, 0) + 1
             
             summary = BenchmarkSummary(
@@ -302,7 +288,6 @@ class BenchmarkEngine:
                 confidence_level=0
             )
         
-        # Calculate metrics
         latency_a = statistics.mean([r.latency_ms for r in results_a])
         latency_b = statistics.mean([r.latency_ms for r in results_b])
         
@@ -312,7 +297,6 @@ class BenchmarkEngine:
         file_size_a = statistics.mean([r.file_size_bytes for r in results_a])
         file_size_b = statistics.mean([r.file_size_bytes for r in results_b])
         
-        # Determine winner (lower latency wins, higher success rate wins)
         latency_score_a = 1 / latency_a if latency_a > 0 else 0
         latency_score_b = 1 / latency_b if latency_b > 0 else 0
         
@@ -321,7 +305,6 @@ class BenchmarkEngine:
         
         winner = provider_a if combined_score_a > combined_score_b else provider_b
         
-        # Statistical significance (simplified t-test approximation)
         latency_improvement = ((latency_a - latency_b) / latency_a * 100) if latency_a > 0 else 0
         
         return ComparisonResult(
@@ -331,33 +314,29 @@ class BenchmarkEngine:
             latency_improvement_pct=abs(latency_improvement),
             success_rate_diff=abs(success_rate_a - success_rate_b),
             avg_file_size_diff_bytes=abs(file_size_a - file_size_b),
-            statistical_significance=abs(latency_improvement) > 5,  # Simplified threshold
+            statistical_significance=abs(latency_improvement) > 5,
             confidence_level=95.0 if abs(latency_improvement) > 10 else 80.0
         )
     
     def update_elo_ratings(self, results: List[BenchmarkResult]):
         """Update ELO ratings based on head-to-head comparisons"""
         
-        # Group results by sample for fair comparison
         sample_results = {}
         for result in results:
-            if result.success:  # Only consider successful results
+            if result.success:
                 if result.sample_id not in sample_results:
                     sample_results[result.sample_id] = []
                 sample_results[result.sample_id].append(result)
         
-        # Perform head-to-head comparisons
         for sample_id, sample_results_list in sample_results.items():
             if len(sample_results_list) < 2:
                 continue
             
-            # Compare all pairs
             for i in range(len(sample_results_list)):
                 for j in range(i + 1, len(sample_results_list)):
                     result_a = sample_results_list[i]
                     result_b = sample_results_list[j]
                     
-                    # Determine winner (lower latency wins)
                     if result_a.latency_ms < result_b.latency_ms:
                         self._update_elo_pair(result_a.provider, result_b.provider, 1)
                     elif result_b.latency_ms < result_a.latency_ms:
@@ -368,14 +347,10 @@ class BenchmarkEngine:
     def _update_elo_pair(self, provider_a: str, provider_b: str, score: float):
         """Update ELO ratings for a pair of providers"""
         
-        # Determine winner/loser for database update
         if score > 0.5:
-            # Provider A wins
             db.update_elo_ratings(provider_a, provider_b, BENCHMARK_CONFIG["elo_k_factor"])
         elif score < 0.5:
-            # Provider B wins
             db.update_elo_ratings(provider_b, provider_a, BENCHMARK_CONFIG["elo_k_factor"])
-        # For ties (score == 0.5), we don't update ELO ratings
     
     def get_leaderboard(self) -> List[Dict[str, Any]]:
         """Get current ELO leaderboard from database"""
