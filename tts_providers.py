@@ -433,14 +433,14 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
         super().__init__("elevenlabs_flash")
         # Map friendly voice names to voice IDs (based on Artificial Analysis methodology)
         # Only voices listed on https://artificialanalysis.ai/text-to-speech/methodology
-        # Turbo v2.5: Laura, Jessica, Liam, Elizabeth, Shelley, Dan, Nathaniel
+        # Turbo v2.5: Laura, Jessica, Liam, Elizabeth, Jarnathan, Dan, Nathaniel
         # Fallback voice IDs (from Artificial Analysis - may not work for all accounts)
         self.fallback_voice_id_map = {
             "Laura": "FGY2WhTYpPnrIDTdsKH5",
             "Jessica": "cgSgspJ2msm6clMCkdW9",
             "Liam": "TX3LPaxmHKxFdv7VOQHJ",
             "Elizabeth": "MF3mGyEYCl7XYWbV9V6O",
-            "Shelley": "DWAVQCwqGrmKZMpKIqGa",
+            "Jarnathan": "c6SfcYrb2t09NHXiT80T",
             "Dan": "TxGEqnHWrfWFTfGW9XjX",
             "Nathaniel": "N2lVS1w4EtoT3dr4eOWO"
         }
@@ -690,14 +690,14 @@ class ElevenLabsV3TTSProvider(TTSProvider):
         super().__init__("elevenlabs_v3")
         # Map friendly voice names to voice IDs (based on Artificial Analysis methodology)
         # Only voices listed on https://artificialanalysis.ai/text-to-speech/methodology
-        # Turbo v2.5: Laura, Jessica, Liam, Elizabeth, Shelley, Dan, Nathaniel
+        # Turbo v2.5: Laura, Jessica, Liam, Elizabeth, Jarnathan, Dan, Nathaniel
         # Fallback voice IDs (from Artificial Analysis - may not work for all accounts)
         self.fallback_voice_id_map = {
             "Laura": "FGY2WhTYpPnrIDTdsKH5",
             "Jessica": "cgSgspJ2msm6clMCkdW9",
             "Liam": "TX3LPaxmHKxFdv7VOQHJ",
             "Elizabeth": "MF3mGyEYCl7XYWbV9V6O",
-            "Shelley": "DWAVQCwqGrmKZMpKIqGa",
+            "Jarnathan": "c6SfcYrb2t09NHXiT80T",
             "Dan": "TxGEqnHWrfWFTfGW9XjX",
             "Nathaniel": "N2lVS1w4EtoT3dr4eOWO"
         }
