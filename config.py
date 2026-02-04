@@ -143,7 +143,8 @@ TTS_PROVIDERS = {
         name="Cartesia Sonic 2.0",
         api_key_env="CARTESIA_API_KEY",
         base_url="https://api.cartesia.ai/tts/bytes",
-        supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man", "Newsman"],
+        # Note: Removed "Newsman" voice as it's not available in Sonic 2.0
+        supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man"],
         max_chars=5000,
         supports_streaming=True,
         model_name="Cartesia Sonic 2.0",
@@ -154,14 +155,14 @@ TTS_PROVIDERS = {
             "Friendly Reading Man": VoiceInfo("Friendly Reading Man", "Friendly Reading Man", "male", "US"),
             "Midwestern Woman": VoiceInfo("Midwestern Woman", "Midwestern Woman", "female", "US"),
             "Professional Man": VoiceInfo("Professional Man", "Professional Man", "male", "US"),
-            "Newsman": VoiceInfo("Newsman", "Newsman", "male", "US"),
         }
     ),
     "cartesia_turbo": TTSConfig(
         name="Cartesia Sonic Turbo",
         api_key_env="CARTESIA_API_KEY",
         base_url="https://api.cartesia.ai/tts/bytes",
-        supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man", "Newsman"],
+        # Note: Removed "Newsman" voice as it's not available in Sonic Turbo
+        supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man"],
         max_chars=5000,
         supports_streaming=True,
         model_name="Cartesia Sonic Turbo",
@@ -172,7 +173,6 @@ TTS_PROVIDERS = {
             "Friendly Reading Man": VoiceInfo("Friendly Reading Man", "Friendly Reading Man", "male", "US"),
             "Midwestern Woman": VoiceInfo("Midwestern Woman", "Midwestern Woman", "female", "US"),
             "Professional Man": VoiceInfo("Professional Man", "Professional Man", "male", "US"),
-            "Newsman": VoiceInfo("Newsman", "Newsman", "male", "US"),
         }
     ),
     "cartesia_sonic3": TTSConfig(
