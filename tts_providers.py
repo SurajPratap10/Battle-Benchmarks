@@ -135,17 +135,13 @@ class MurfFalconOct23TTSProvider(TTSProvider):
             "Content-Type": "application/json"
         }
         
-        # Murf Falcon API payload structure (matching API docs)
-        # Extract locale from voice_id (e.g., "en-US-matthew" -> "en-US")
-        voice_locale = request.voice.split("-", 2)[0] + "-" + request.voice.split("-", 2)[1] if "-" in request.voice else "en-US"
-        
+        # Murf Falcon Oct 23 API payload structure
         payload = {
-            "voice_id": request.voice,
             "text": request.text,
-            "multi_native_locale": voice_locale,
-            "model": "FALCON",
-            "format": "MP3",
+            "voiceId": request.voice,
+            "format": "mp3",
             "sampleRate": 24000,
+            "model": "FALCON",
             "channelType": "MONO"
         }
         

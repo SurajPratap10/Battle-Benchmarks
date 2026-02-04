@@ -31,113 +31,21 @@ TTS_PROVIDERS = {
         name="Murf",
         api_key_env="MURF_API_KEY",
         base_url="https://global.api.murf.ai/v1/speech/stream",
-        # All Falcon voices available in Murf API
-        supported_voices=[
-            # US English - Male
-            "en-US-matthew", "en-US-carter", "en-US-terrell", "en-US-david", "en-US-james", "en-US-michael", 
-            "en-US-william", "en-US-chris", "en-US-alex", "en-US-ryan", "en-US-brandon", "en-US-joshua",
-            # US English - Female
-            "en-US-phoebe", "en-US-natalie", "en-US-sarah", "en-US-emily", "en-US-jessica", "en-US-olivia",
-            "en-US-sophia", "en-US-isabella", "en-US-ava", "en-US-mia", "en-US-charlotte", "en-US-amelia",
-            # UK English - Male
-            "en-UK-theo", "en-UK-mason", "en-UK-henry", "en-UK-arthur", "en-UK-oscar", "en-UK-george",
-            "en-UK-noah", "en-UK-oliver", "en-UK-leo", "en-UK-charlie", "en-UK-harry", "en-UK-jack",
-            # UK English - Female
-            "en-UK-ruby", "en-UK-hazel", "en-UK-lily", "en-UK-emma", "en-UK-chloe", "en-UK-grace",
-            "en-UK-ella", "en-UK-freya", "en-UK-sophia", "en-UK-isabella", "en-UK-mia", "en-UK-amelia",
-            # Australian English - Male
-            "en-AU-lucas", "en-AU-ethan", "en-AU-lachlan", "en-AU-jackson", "en-AU-thomas", "en-AU-william",
-            # Australian English - Female
-            "en-AU-charlotte", "en-AU-olivia", "en-AU-amelia", "en-AU-isla", "en-AU-ava", "en-AU-grace",
-            # Indian English - Male
-            "en-IN-arjun", "en-IN-rahul", "en-IN-vikram", "en-IN-aditya", "en-IN-karan", "en-IN-raj",
-            # Indian English - Female
-            "en-IN-priya", "en-IN-ananya", "en-IN-kavya", "en-IN-meera", "en-IN-aditi", "en-IN-sneha",
-        ],
+        # Only voices from https://artificialanalysis.ai/text-to-speech/methodology
+        # Methodology lists: 2 voices each for Male/Female and US/UK combinations (8 total)
+        supported_voices=["en-US-carter", "en-US-phoebe", "en-US-terrell", "en-US-natalie", "en-UK-theo", "en-UK-mason", "en-UK-ruby", "en-UK-hazel"],
         max_chars=3000,
         supports_streaming=True,
         model_name="Falcon",
         voice_info={
-            # US English - Male
-            "en-US-matthew": VoiceInfo("en-US-matthew", "Matthew", "male", "US"),
             "en-US-carter": VoiceInfo("en-US-carter", "Carter", "male", "US"),
-            "en-US-terrell": VoiceInfo("en-US-terrell", "Terrell", "male", "US"),
-            "en-US-david": VoiceInfo("en-US-david", "David", "male", "US"),
-            "en-US-james": VoiceInfo("en-US-james", "James", "male", "US"),
-            "en-US-michael": VoiceInfo("en-US-michael", "Michael", "male", "US"),
-            "en-US-william": VoiceInfo("en-US-william", "William", "male", "US"),
-            "en-US-chris": VoiceInfo("en-US-chris", "Chris", "male", "US"),
-            "en-US-alex": VoiceInfo("en-US-alex", "Alex", "male", "US"),
-            "en-US-ryan": VoiceInfo("en-US-ryan", "Ryan", "male", "US"),
-            "en-US-brandon": VoiceInfo("en-US-brandon", "Brandon", "male", "US"),
-            "en-US-joshua": VoiceInfo("en-US-joshua", "Joshua", "male", "US"),
-            # US English - Female
             "en-US-phoebe": VoiceInfo("en-US-phoebe", "Phoebe", "female", "US"),
+            "en-US-terrell": VoiceInfo("en-US-terrell", "Terrell", "male", "US"),
             "en-US-natalie": VoiceInfo("en-US-natalie", "Natalie", "female", "US"),
-            "en-US-sarah": VoiceInfo("en-US-sarah", "Sarah", "female", "US"),
-            "en-US-emily": VoiceInfo("en-US-emily", "Emily", "female", "US"),
-            "en-US-jessica": VoiceInfo("en-US-jessica", "Jessica", "female", "US"),
-            "en-US-olivia": VoiceInfo("en-US-olivia", "Olivia", "female", "US"),
-            "en-US-sophia": VoiceInfo("en-US-sophia", "Sophia", "female", "US"),
-            "en-US-isabella": VoiceInfo("en-US-isabella", "Isabella", "female", "US"),
-            "en-US-ava": VoiceInfo("en-US-ava", "Ava", "female", "US"),
-            "en-US-mia": VoiceInfo("en-US-mia", "Mia", "female", "US"),
-            "en-US-charlotte": VoiceInfo("en-US-charlotte", "Charlotte", "female", "US"),
-            "en-US-amelia": VoiceInfo("en-US-amelia", "Amelia", "female", "US"),
-            # UK English - Male
             "en-UK-theo": VoiceInfo("en-UK-theo", "Theo", "male", "UK"),
             "en-UK-mason": VoiceInfo("en-UK-mason", "Mason", "male", "UK"),
-            "en-UK-henry": VoiceInfo("en-UK-henry", "Henry", "male", "UK"),
-            "en-UK-arthur": VoiceInfo("en-UK-arthur", "Arthur", "male", "UK"),
-            "en-UK-oscar": VoiceInfo("en-UK-oscar", "Oscar", "male", "UK"),
-            "en-UK-george": VoiceInfo("en-UK-george", "George", "male", "UK"),
-            "en-UK-noah": VoiceInfo("en-UK-noah", "Noah", "male", "UK"),
-            "en-UK-oliver": VoiceInfo("en-UK-oliver", "Oliver", "male", "UK"),
-            "en-UK-leo": VoiceInfo("en-UK-leo", "Leo", "male", "UK"),
-            "en-UK-charlie": VoiceInfo("en-UK-charlie", "Charlie", "male", "UK"),
-            "en-UK-harry": VoiceInfo("en-UK-harry", "Harry", "male", "UK"),
-            "en-UK-jack": VoiceInfo("en-UK-jack", "Jack", "male", "UK"),
-            # UK English - Female
             "en-UK-ruby": VoiceInfo("en-UK-ruby", "Ruby", "female", "UK"),
             "en-UK-hazel": VoiceInfo("en-UK-hazel", "Hazel", "female", "UK"),
-            "en-UK-lily": VoiceInfo("en-UK-lily", "Lily", "female", "UK"),
-            "en-UK-emma": VoiceInfo("en-UK-emma", "Emma", "female", "UK"),
-            "en-UK-chloe": VoiceInfo("en-UK-chloe", "Chloe", "female", "UK"),
-            "en-UK-grace": VoiceInfo("en-UK-grace", "Grace", "female", "UK"),
-            "en-UK-ella": VoiceInfo("en-UK-ella", "Ella", "female", "UK"),
-            "en-UK-freya": VoiceInfo("en-UK-freya", "Freya", "female", "UK"),
-            "en-UK-sophia": VoiceInfo("en-UK-sophia", "Sophia", "female", "UK"),
-            "en-UK-isabella": VoiceInfo("en-UK-isabella", "Isabella", "female", "UK"),
-            "en-UK-mia": VoiceInfo("en-UK-mia", "Mia", "female", "UK"),
-            "en-UK-amelia": VoiceInfo("en-UK-amelia", "Amelia", "female", "UK"),
-            # Australian English - Male
-            "en-AU-lucas": VoiceInfo("en-AU-lucas", "Lucas", "male", "AU"),
-            "en-AU-ethan": VoiceInfo("en-AU-ethan", "Ethan", "male", "AU"),
-            "en-AU-lachlan": VoiceInfo("en-AU-lachlan", "Lachlan", "male", "AU"),
-            "en-AU-jackson": VoiceInfo("en-AU-jackson", "Jackson", "male", "AU"),
-            "en-AU-thomas": VoiceInfo("en-AU-thomas", "Thomas", "male", "AU"),
-            "en-AU-william": VoiceInfo("en-AU-william", "William", "male", "AU"),
-            # Australian English - Female
-            "en-AU-charlotte": VoiceInfo("en-AU-charlotte", "Charlotte", "female", "AU"),
-            "en-AU-olivia": VoiceInfo("en-AU-olivia", "Olivia", "female", "AU"),
-            "en-AU-amelia": VoiceInfo("en-AU-amelia", "Amelia", "female", "AU"),
-            "en-AU-isla": VoiceInfo("en-AU-isla", "Isla", "female", "AU"),
-            "en-AU-ava": VoiceInfo("en-AU-ava", "Ava", "female", "AU"),
-            "en-AU-grace": VoiceInfo("en-AU-grace", "Grace", "female", "AU"),
-            # Indian English - Male
-            "en-IN-arjun": VoiceInfo("en-IN-arjun", "Arjun", "male", "IN"),
-            "en-IN-rahul": VoiceInfo("en-IN-rahul", "Rahul", "male", "IN"),
-            "en-IN-vikram": VoiceInfo("en-IN-vikram", "Vikram", "male", "IN"),
-            "en-IN-aditya": VoiceInfo("en-IN-aditya", "Aditya", "male", "IN"),
-            "en-IN-karan": VoiceInfo("en-IN-karan", "Karan", "male", "IN"),
-            "en-IN-raj": VoiceInfo("en-IN-raj", "Raj", "male", "IN"),
-            # Indian English - Female
-            "en-IN-priya": VoiceInfo("en-IN-priya", "Priya", "female", "IN"),
-            "en-IN-ananya": VoiceInfo("en-IN-ananya", "Ananya", "female", "IN"),
-            "en-IN-kavya": VoiceInfo("en-IN-kavya", "Kavya", "female", "IN"),
-            "en-IN-meera": VoiceInfo("en-IN-meera", "Meera", "female", "IN"),
-            "en-IN-aditi": VoiceInfo("en-IN-aditi", "Aditi", "female", "IN"),
-            "en-IN-sneha": VoiceInfo("en-IN-sneha", "Sneha", "female", "IN"),
         }
     ),
     "deepgram": TTSConfig(
