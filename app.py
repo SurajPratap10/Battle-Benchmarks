@@ -168,11 +168,11 @@ def main():
     st.markdown("Compare Text-to-Speech providers with comprehensive metrics and analysis")
     
     with st.sidebar:
-        default_page = "Quick Test"
+        default_page = "Blind Test"
         
         st.subheader("Navigator")
         
-        pages = ["Leaderboard", "Quick Test", "Blind Test"]
+        pages = ["Blind Test", "Leaderboard", "Quick Test"]
         
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
@@ -183,7 +183,7 @@ def main():
             page = st.session_state.navigate_to
             st.session_state.navigate_to = None
         else:
-            page = st.session_state.get("current_page", "Leaderboard")
+            page = st.session_state.get("current_page", "Blind Test")
         
         st.divider()
         
@@ -459,7 +459,7 @@ def display_quick_test_results(results: List[BenchmarkResult]):
 def blind_test_page():
     """Blind test page for unbiased audio quality comparison - Voice Battles style"""
     
-    st.header("Voice Battles - Blind Test")
+    st.header("Blind Test")
     st.markdown("Compare TTS providers head-to-head. Listen to at least 3 seconds of each sample before voting.")
     
     config_status = check_configuration()
