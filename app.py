@@ -781,7 +781,7 @@ def display_blind_test_comparison():
     if pair is None or pair.get("error"):
         error_msg = pair.get("message", "Failed to generate comparison.") if pair else "Failed to generate comparison."
         st.error(f"⚠️ {error_msg}")
-        if st.button("🔄 Retry", type="primary"):
+        if st.button("Retry", type="primary"):
             st.session_state.blind_test_current_pair = None
             st.rerun()
         return
