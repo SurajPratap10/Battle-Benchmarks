@@ -86,7 +86,7 @@ TTS_PROVIDERS = {
         name="ElevenLabs Flash",
         api_key_env="ELEVENLABS_API_KEY",
         base_url="https://api.elevenlabs.io/v1/text-to-speech",
-        supported_voices=["Laura", "Jessica", "Liam", "Jarnathan", "Elizabeth", "Shelley", "Dan", "Nathaniel"],
+        supported_voices=["Laura", "Jessica", "Liam", "Elizabeth", "Shelley", "Dan", "Nathaniel"],
         max_chars=5000,
         supports_streaming=True,
         model_name="eleven_flash_v2_5",
@@ -94,7 +94,6 @@ TTS_PROVIDERS = {
             "Laura": VoiceInfo("Laura", "Laura", "female", "US"),
             "Jessica": VoiceInfo("Jessica", "Jessica", "female", "US"),
             "Liam": VoiceInfo("Liam", "Liam", "male", "US"),
-            "Jarnathan": VoiceInfo("Jarnathan", "Jarnathan", "male", "US"),
             "Elizabeth": VoiceInfo("Elizabeth", "Elizabeth", "female", "UK"),
             "Shelley": VoiceInfo("Shelley", "Shelley", "female", "UK"),
             "Dan": VoiceInfo("Dan", "Dan", "male", "UK"),
@@ -105,7 +104,7 @@ TTS_PROVIDERS = {
         name="ElevenLabs v3",
         api_key_env="ELEVENLABS_API_KEY",
         base_url="https://api.elevenlabs.io/v1/text-to-speech",
-        supported_voices=["Laura", "Jessica", "Liam", "Jarnathan", "Elizabeth", "Shelley", "Dan", "Nathaniel"],
+        supported_voices=["Laura", "Jessica", "Liam", "Elizabeth", "Shelley", "Dan", "Nathaniel"],
         max_chars=5000,
         supports_streaming=True,
         model_name="eleven_v3",
@@ -113,7 +112,6 @@ TTS_PROVIDERS = {
             "Laura": VoiceInfo("Laura", "Laura", "female", "US"),
             "Jessica": VoiceInfo("Jessica", "Jessica", "female", "US"),
             "Liam": VoiceInfo("Liam", "Liam", "male", "US"),
-            "Jarnathan": VoiceInfo("Jarnathan", "Jarnathan", "male", "US"),
             "Elizabeth": VoiceInfo("Elizabeth", "Elizabeth", "female", "UK"),
             "Shelley": VoiceInfo("Shelley", "Shelley", "female", "UK"),
             "Dan": VoiceInfo("Dan", "Dan", "male", "UK"),
@@ -143,7 +141,6 @@ TTS_PROVIDERS = {
         name="Cartesia Sonic 2.0",
         api_key_env="CARTESIA_API_KEY",
         base_url="https://api.cartesia.ai/tts/bytes",
-        # Note: Removed "Newsman" voice as it's not available in Sonic 2.0
         supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man"],
         max_chars=5000,
         supports_streaming=True,
@@ -161,7 +158,6 @@ TTS_PROVIDERS = {
         name="Cartesia Sonic Turbo",
         api_key_env="CARTESIA_API_KEY",
         base_url="https://api.cartesia.ai/tts/bytes",
-        # Note: Removed "Newsman" voice as it's not available in Sonic Turbo
         supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man"],
         max_chars=5000,
         supports_streaming=True,
@@ -179,7 +175,6 @@ TTS_PROVIDERS = {
         name="Cartesia Sonic 3",
         api_key_env="CARTESIA_API_KEY",
         base_url="https://api.cartesia.ai/tts/bytes",
-        # Note: Removed "Newsman" voice as it's not available in Sonic 3
         supported_voices=["British Lady", "Conversational Lady", "Classy British Man", "Friendly Reading Man", "Midwestern Woman", "Professional Man"],
         max_chars=5000,
         supports_streaming=True,
@@ -238,7 +233,7 @@ BENCHMARK_CONFIG = {
     "quality_metrics": ["duration", "file_size", "sample_rate"],
     "latency_percentiles": [50, 90, 95, 99],
     "elo_k_factor": 32,
-    "initial_elo_rating": 1500
+    "initial_elo_rating": 1000
 }
 
 # Test Dataset Configuration  

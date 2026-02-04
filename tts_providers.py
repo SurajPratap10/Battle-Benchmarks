@@ -433,13 +433,12 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
         super().__init__("elevenlabs_flash")
         # Map friendly voice names to voice IDs (based on Artificial Analysis methodology)
         # Only voices listed on https://artificialanalysis.ai/text-to-speech/methodology
-        # Turbo v2.5: Laura, Jessica, Jarnathan, Liam, Elizabeth, Shelley, Dan, Nathaniel
+        # Turbo v2.5: Laura, Jessica, Liam, Elizabeth, Shelley, Dan, Nathaniel
         # Fallback voice IDs (from Artificial Analysis - may not work for all accounts)
         self.fallback_voice_id_map = {
             "Laura": "FGY2WhTYpPnrIDTdsKH5",
             "Jessica": "cgSgspJ2msm6clMCkdW9",
             "Liam": "TX3LPaxmHKxFdv7VOQHJ",
-            "Jarnathan": "P5pyBRCcCzNxLpVAXvNk",
             "Elizabeth": "MF3mGyEYCl7XYWbV9V6O",
             "Shelley": "DWAVQCwqGrmKZMpKIqGa",
             "Dan": "TxGEqnHWrfWFTfGW9XjX",
@@ -677,7 +676,11 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
             )
     
     def get_available_voices(self) -> list:
-        """Get available ElevenLabs Flash voices"""
+        """Get available ElevenLabs Flash voices - returns actual voices from account if fetched, otherwise config voices"""
+        # If voices have been fetched from API, return those (account-specific voices)
+        if self.voice_id_map:
+            return list(self.voice_id_map.keys())
+        # Otherwise return config voices (fallback)
         return self.config.supported_voices
 
 class ElevenLabsV3TTSProvider(TTSProvider):
@@ -687,13 +690,12 @@ class ElevenLabsV3TTSProvider(TTSProvider):
         super().__init__("elevenlabs_v3")
         # Map friendly voice names to voice IDs (based on Artificial Analysis methodology)
         # Only voices listed on https://artificialanalysis.ai/text-to-speech/methodology
-        # Turbo v2.5: Laura, Jessica, Jarnathan, Liam, Elizabeth, Shelley, Dan, Nathaniel
+        # Turbo v2.5: Laura, Jessica, Liam, Elizabeth, Shelley, Dan, Nathaniel
         # Fallback voice IDs (from Artificial Analysis - may not work for all accounts)
         self.fallback_voice_id_map = {
             "Laura": "FGY2WhTYpPnrIDTdsKH5",
             "Jessica": "cgSgspJ2msm6clMCkdW9",
             "Liam": "TX3LPaxmHKxFdv7VOQHJ",
-            "Jarnathan": "P5pyBRCcCzNxLpVAXvNk",
             "Elizabeth": "MF3mGyEYCl7XYWbV9V6O",
             "Shelley": "DWAVQCwqGrmKZMpKIqGa",
             "Dan": "TxGEqnHWrfWFTfGW9XjX",
@@ -857,7 +859,11 @@ class ElevenLabsV3TTSProvider(TTSProvider):
             )
     
     def get_available_voices(self) -> list:
-        """Get available ElevenLabs v3 voices"""
+        """Get available ElevenLabs v3 voices - returns actual voices from account if fetched, otherwise config voices"""
+        # If voices have been fetched from API, return those (account-specific voices)
+        if self.voice_id_map:
+            return list(self.voice_id_map.keys())
+        # Otherwise return config voices (fallback)
         return self.config.supported_voices
 
 class OpenAITTSProvider(TTSProvider):
