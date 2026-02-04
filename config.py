@@ -178,7 +178,7 @@ TTS_PROVIDERS = {
         name="ElevenLabs Flash",
         api_key_env="ELEVENLABS_API_KEY",
         base_url="https://api.elevenlabs.io/v1/text-to-speech",
-        supported_voices=["Laura", "Jessica", "Liam", "Elizabeth", "Shelley", "Dan", "Nathaniel"],
+        supported_voices=["Laura", "Jessica", "Liam", "Elizabeth", "Dan", "Nathaniel"],
         max_chars=5000,
         supports_streaming=True,
         model_name="eleven_flash_v2_5",
@@ -187,7 +187,6 @@ TTS_PROVIDERS = {
             "Jessica": VoiceInfo("Jessica", "Jessica", "female", "US"),
             "Liam": VoiceInfo("Liam", "Liam", "male", "US"),
             "Elizabeth": VoiceInfo("Elizabeth", "Elizabeth", "female", "UK"),
-            "Shelley": VoiceInfo("Shelley", "Shelley", "female", "UK"),
             "Dan": VoiceInfo("Dan", "Dan", "male", "UK"),
             "Nathaniel": VoiceInfo("Nathaniel", "Nathaniel", "male", "UK"),
         }
@@ -196,7 +195,7 @@ TTS_PROVIDERS = {
         name="ElevenLabs v3",
         api_key_env="ELEVENLABS_API_KEY",
         base_url="https://api.elevenlabs.io/v1/text-to-speech",
-        supported_voices=["Laura", "Jessica", "Liam", "Elizabeth", "Shelley", "Dan", "Nathaniel"],
+        supported_voices=["Laura", "Jessica", "Liam", "Elizabeth", "Dan", "Nathaniel"],
         max_chars=5000,
         supports_streaming=True,
         model_name="eleven_v3",
@@ -205,7 +204,6 @@ TTS_PROVIDERS = {
             "Jessica": VoiceInfo("Jessica", "Jessica", "female", "US"),
             "Liam": VoiceInfo("Liam", "Liam", "male", "US"),
             "Elizabeth": VoiceInfo("Elizabeth", "Elizabeth", "female", "UK"),
-            "Shelley": VoiceInfo("Shelley", "Shelley", "female", "UK"),
             "Dan": VoiceInfo("Dan", "Dan", "male", "UK"),
             "Nathaniel": VoiceInfo("Nathaniel", "Nathaniel", "male", "UK"),
         }
