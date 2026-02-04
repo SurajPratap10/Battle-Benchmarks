@@ -6,12 +6,31 @@ import asyncio
 import aiohttp
 import requests
 import ssl
+import certifi
 from typing import Dict, Any, Optional, Tuple, AsyncGenerator
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import io
 import json
 from config import get_api_key, TTS_PROVIDERS
+
+def get_ssl_context():
+    """Create SSL context with proper certificate handling"""
+    try:
+        # Try to use certifi certificates first
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        return ssl_context
+    except Exception:
+        # Fallback to no verification if certifi fails
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        return ssl_context
+
+def get_connector():
+    """Create aiohttp connector with SSL handling"""
+    ssl_context = get_ssl_context()
+    return aiohttp.TCPConnector(ssl=ssl_context)
 
 @dataclass
 class TTSResult:
@@ -66,7 +85,7 @@ class TTSProvider(ABC):
         """Measure pure network latency (RTT) without TTS processing"""
         try:
             start_time = time.time()
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 # Send a minimal HEAD or OPTIONS request to measure pure network latency
                 async with session.head(
                     self.config.base_url,
@@ -79,7 +98,7 @@ class TTSProvider(ABC):
             # If HEAD doesn't work, fallback to minimal GET/POST
             try:
                 start_time = time.time()
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(connector=get_connector()) as session:
                     async with session.get(
                         self.config.base_url.replace("/v1/speech/", "/").replace("turbo-stream", "").replace("stream", "").rstrip("/"),
                         timeout=aiohttp.ClientTimeout(total=5)
@@ -88,441 +107,6 @@ class TTSProvider(ABC):
                         return latency_ms
             except:
                 return 0.0  # Return 0 if ping fails
-
-class MurfAITTSProvider(TTSProvider):
-    """Murf AI TTS provider implementation"""
-    
-    def __init__(self):
-        super().__init__("murf")
-    
-    async def generate_speech(self, request: TTSRequest) -> TTSResult:
-        """Generate speech using Murf AI API"""
-        start_time = time.time()
-        
-        # Validate request
-        is_valid, error_msg = self.validate_request(request)
-        if not is_valid:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=0,
-                file_size_bytes=0,
-                error_message=error_msg,
-                metadata={}
-            )
-        
-        headers = {
-            "api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        # Murf AI API payload structure
-        payload = {
-            "text": request.text,
-            "voiceId": request.voice,
-            "format": "mp3",  # Murf v1 uses 'format' not 'audioFormat'
-            "sampleRate": 24000,
-            "channelType": "MONO"
-        }
-        
-        # Add speed/rate if specified
-        if request.speed and request.speed != 1.0:
-            payload["rate"] = request.speed
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.base_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    end_time = time.time()
-                    latency_ms = (end_time - start_time) * 1000
-                    
-                    if response.status == 200:
-                        # Check content type to determine response format
-                        content_type = response.headers.get('content-type', '').lower()
-                        
-                        if 'application/json' in content_type:
-                            # JSON response - might contain audio URL or data
-                            response_data = await response.json()
-                            
-                            if "audioFile" in response_data:
-                                # Murf AI returns audio URL in audioFile field
-                                audio_url = response_data["audioFile"]
-                                async with session.get(audio_url) as audio_response:
-                                    if audio_response.status == 200:
-                                        audio_data = await audio_response.read()
-                                        return TTSResult(
-                                            success=True,
-                                            audio_data=audio_data,
-                                            latency_ms=latency_ms,
-                                            file_size_bytes=len(audio_data),
-                                            error_message=None,
-                                            metadata={
-                                                "voice": request.voice,
-                                                "speed": request.speed,
-                                                "format": request.format,
-                                                "provider": self.provider_id,
-                                                "audio_url": audio_url
-                                            }
-                                        )
-                                    else:
-                                        return TTSResult(
-                                            success=False,
-                                            audio_data=None,
-                                            latency_ms=latency_ms,
-                                            file_size_bytes=0,
-                                            error_message=f"Failed to download audio from URL: {audio_response.status}",
-                                            metadata={"provider": self.provider_id}
-                                        )
-                            elif "audio" in response_data:
-                                # Base64 encoded audio data
-                                import base64
-                                audio_data = base64.b64decode(response_data["audio"])
-                                return TTSResult(
-                                    success=True,
-                                    audio_data=audio_data,
-                                    latency_ms=latency_ms,
-                                    file_size_bytes=len(audio_data),
-                                    error_message=None,
-                                    metadata={
-                                        "voice": request.voice,
-                                        "speed": request.speed,
-                                        "format": request.format,
-                                        "provider": self.provider_id
-                                    }
-                                )
-                            else:
-                                return TTSResult(
-                                    success=False,
-                                    audio_data=None,
-                                    latency_ms=latency_ms,
-                                    file_size_bytes=0,
-                                    error_message=f"Unexpected JSON response format: {list(response_data.keys())}",
-                                    metadata={"provider": self.provider_id, "response": response_data}
-                                )
-                        else:
-                            # Direct audio data response
-                            audio_data = await response.read()
-                            return TTSResult(
-                                success=True,
-                                audio_data=audio_data,
-                                latency_ms=latency_ms,
-                                file_size_bytes=len(audio_data),
-                                error_message=None,
-                                metadata={
-                                    "voice": request.voice,
-                                    "speed": request.speed,
-                                    "format": request.format,
-                                    "provider": self.provider_id,
-                                    "content_type": content_type
-                                }
-                            )
-                    else:
-                        error_text = await response.text()
-                        return TTSResult(
-                            success=False,
-                            audio_data=None,
-                            latency_ms=latency_ms,
-                            file_size_bytes=0,
-                            error_message=f"API Error {response.status}: {error_text}",
-                            metadata={"provider": self.provider_id}
-                        )
-        
-        except asyncio.TimeoutError:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=(time.time() - start_time) * 1000,
-                file_size_bytes=0,
-                error_message="Request timeout",
-                metadata={"provider": self.provider_id}
-            )
-        except Exception as e:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=(time.time() - start_time) * 1000,
-                file_size_bytes=0,
-                error_message=f"Error: {str(e)}",
-                metadata={"provider": self.provider_id}
-            )
-    
-    def get_available_voices(self) -> list:
-        """Get available Murf AI voices"""
-        return self.config.supported_voices
-
-class MurfFalconTTSProvider(TTSProvider):
-    """Murf Falcon TTS provider implementation (Turbo Stream)"""
-    
-    def __init__(self):
-        super().__init__("murf_falcon")
-    
-    async def generate_speech(self, request: TTSRequest) -> TTSResult:
-        """Generate speech using Murf Falcon API (Turbo Stream)"""
-        start_time = time.time()
-        
-        # Validate request
-        is_valid, error_msg = self.validate_request(request)
-        if not is_valid:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=0,
-                file_size_bytes=0,
-                error_message=error_msg,
-                metadata={}
-            )
-        
-        headers = {
-            "api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        # Murf Falcon API payload structure
-        payload = {
-            "text": request.text,
-            "voiceId": request.voice,
-            "format": "mp3",  # Use 'format' for consistency
-            "sampleRate": 24000,
-            "channelType": "MONO"
-        }
-        
-        # Add speed/rate if specified
-        if request.speed and request.speed != 1.0:
-            payload["rate"] = request.speed
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.base_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    end_time = time.time()
-                    latency_ms = (end_time - start_time) * 1000
-                    
-                    if response.status == 200:
-                        # Check content type to determine response format
-                        content_type = response.headers.get('content-type', '').lower()
-                        
-                        if 'application/json' in content_type:
-                            # JSON response - might contain audio URL or data
-                            response_data = await response.json()
-                            
-                            if "audioFile" in response_data:
-                                # Murf Falcon returns audio URL in audioFile field
-                                audio_url = response_data["audioFile"]
-                                async with session.get(audio_url) as audio_response:
-                                    if audio_response.status == 200:
-                                        audio_data = await audio_response.read()
-                                        return TTSResult(
-                                            success=True,
-                                            audio_data=audio_data,
-                                            latency_ms=latency_ms,
-                                            file_size_bytes=len(audio_data),
-                                            error_message=None,
-                                            metadata={
-                                                "voice": request.voice,
-                                                "speed": request.speed,
-                                                "format": request.format,
-                                                "provider": self.provider_id,
-                                                "model": "falcon-turbo",
-                                                "audio_url": audio_url
-                                            }
-                                        )
-                                    else:
-                                        return TTSResult(
-                                            success=False,
-                                            audio_data=None,
-                                            latency_ms=latency_ms,
-                                            file_size_bytes=0,
-                                            error_message=f"Failed to download audio from URL: {audio_response.status}",
-                                            metadata={"provider": self.provider_id}
-                                        )
-                            elif "audio" in response_data:
-                                # Base64 encoded audio data
-                                import base64
-                                audio_data = base64.b64decode(response_data["audio"])
-                                return TTSResult(
-                                    success=True,
-                                    audio_data=audio_data,
-                                    latency_ms=latency_ms,
-                                    file_size_bytes=len(audio_data),
-                                    error_message=None,
-                                    metadata={
-                                        "voice": request.voice,
-                                        "speed": request.speed,
-                                        "format": request.format,
-                                        "provider": self.provider_id,
-                                        "model": "falcon-turbo"
-                                    }
-                                )
-                            else:
-                                return TTSResult(
-                                    success=False,
-                                    audio_data=None,
-                                    latency_ms=latency_ms,
-                                    file_size_bytes=0,
-                                    error_message=f"Unexpected JSON response format: {list(response_data.keys())}",
-                                    metadata={"provider": self.provider_id, "response": response_data}
-                                )
-                        else:
-                            # Direct audio data response (streaming)
-                            audio_data = await response.read()
-                            return TTSResult(
-                                success=True,
-                                audio_data=audio_data,
-                                latency_ms=latency_ms,
-                                file_size_bytes=len(audio_data),
-                                error_message=None,
-                                metadata={
-                                    "voice": request.voice,
-                                    "speed": request.speed,
-                                    "format": request.format,
-                                    "provider": self.provider_id,
-                                    "model": "falcon-turbo",
-                                    "content_type": content_type
-                                }
-                            )
-                    else:
-                        error_text = await response.text()
-                        return TTSResult(
-                            success=False,
-                            audio_data=None,
-                            latency_ms=latency_ms,
-                            file_size_bytes=0,
-                            error_message=f"API Error {response.status}: {error_text}",
-                            metadata={"provider": self.provider_id}
-                        )
-        
-        except asyncio.TimeoutError:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=(time.time() - start_time) * 1000,
-                file_size_bytes=0,
-                error_message="Request timeout",
-                metadata={"provider": self.provider_id}
-            )
-        except Exception as e:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=(time.time() - start_time) * 1000,
-                file_size_bytes=0,
-                error_message=f"Error: {str(e)}",
-                metadata={"provider": self.provider_id}
-            )
-    
-    def get_available_voices(self) -> list:
-        """Get available Murf Falcon voices"""
-        return self.config.supported_voices
-
-class MurfFalconOct13TTSProvider(TTSProvider):
-    """Murf Falcon Oct 13 TTS provider implementation (New Stream Endpoint)"""
-    
-    def __init__(self):
-        super().__init__("murf_falcon_oct13")
-    
-    async def generate_speech(self, request: TTSRequest) -> TTSResult:
-        """Generate speech using Murf Falcon Oct 13 API (Stream)"""
-        start_time = time.time()
-        
-        # Validate request
-        is_valid, error_msg = self.validate_request(request)
-        if not is_valid:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=0,
-                file_size_bytes=0,
-                error_message=error_msg,
-                metadata={}
-            )
-        
-        headers = {
-            "api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        # Murf Falcon Oct 13 API payload structure
-        payload = {
-            "text": request.text,
-            "voiceId": request.voice,
-            "format": "mp3",
-            "sampleRate": 24000,
-            "model": "FALCON",
-            "channelType": "MONO"
-        }
-        
-        # Add speed/rate if specified
-        if request.speed and request.speed != 1.0:
-            payload["rate"] = request.speed
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.base_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    latency_ms = (time.time() - start_time) * 1000
-                    
-                    if response.status == 200:
-                        audio_data = await response.read()
-                        file_size = len(audio_data)
-                        
-                        return TTSResult(
-                            success=True,
-                            audio_data=audio_data,
-                            latency_ms=latency_ms,
-                            file_size_bytes=file_size,
-                            error_message=None,
-                            metadata={
-                                "provider": self.provider_id,
-                                "model": "FALCON",
-                                "voice": request.voice,
-                                "format": request.format or "mp3"
-                            }
-                        )
-                    else:
-                        error_text = await response.text()
-                        return TTSResult(
-                            success=False,
-                            audio_data=None,
-                            latency_ms=latency_ms,
-                            file_size_bytes=0,
-                            error_message=f"API Error {response.status}: {error_text}",
-                            metadata={"provider": self.provider_id}
-                        )
-        
-        except asyncio.TimeoutError:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=(time.time() - start_time) * 1000,
-                file_size_bytes=0,
-                error_message="Request timeout",
-                metadata={"provider": self.provider_id}
-            )
-        except Exception as e:
-            return TTSResult(
-                success=False,
-                audio_data=None,
-                latency_ms=(time.time() - start_time) * 1000,
-                file_size_bytes=0,
-                error_message=f"Error: {str(e)}",
-                metadata={"provider": self.provider_id}
-            )
-    
-    def get_available_voices(self) -> list:
-        """Get available Murf Falcon Oct 13 voices"""
-        return self.config.supported_voices
 
 class MurfFalconOct23TTSProvider(TTSProvider):
     """Murf Falcon Oct 23 TTS provider implementation (Global Stream Endpoint)"""
@@ -566,7 +150,7 @@ class MurfFalconOct23TTSProvider(TTSProvider):
             payload["rate"] = request.speed
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     self.config.base_url,
                     headers=headers,
@@ -672,7 +256,7 @@ class DeepgramTTSProvider(TTSProvider):
         url_with_params = f"{self.config.base_url}?" + "&".join([f"{k}={v}" for k, v in params.items()])
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     url_with_params,
                     headers=headers,
@@ -780,7 +364,7 @@ class DeepgramAura2TTSProvider(TTSProvider):
         url_with_params = f"{self.config.base_url}?" + "&".join([f"{k}={v}" for k, v in params.items()])
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     url_with_params,
                     headers=headers,
@@ -847,22 +431,74 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
     
     def __init__(self):
         super().__init__("elevenlabs_flash")
-        # Map friendly voice names to voice IDs
-        self.voice_id_map = {
-            "Rachel": "21m00Tcm4TlvDq8ikWAM",
-            "Domi": "AZnzlk1XvdvUeBnXmlld",
-            "Bella": "EXAVITQu4vr4xnSDxMaL",
-            "Antoni": "ErXwobaYiN019PkySvjV",
-            "Elli": "MF3mGyEYCl7XYWbV9V6O",
-            "Josh": "TxGEqnHWrfWFTfGW9XjX",
-            "Arnold": "VR6AewLTigWG4xSOukaG",
-            "Adam": "pNInz6obpgDQGcFmaJgB",
-            "Sam": "yoZ06aMxZJJ28mfd3POQ"
+        # Map friendly voice names to voice IDs (based on Artificial Analysis methodology)
+        # Only voices listed on https://artificialanalysis.ai/text-to-speech/methodology
+        # Turbo v2.5: Laura, Jessica, Jarnathan, Liam, Elizabeth, Shelley, Dan, Nathaniel
+        # Fallback voice IDs (from Artificial Analysis - may not work for all accounts)
+        self.fallback_voice_id_map = {
+            "Laura": "FGY2WhTYpPnrIDTdsKH5",
+            "Jessica": "cgSgspJ2msm6clMCkdW9",
+            "Liam": "TX3LPaxmHKxFdv7VOQHJ",
+            "Jarnathan": "P5pyBRCcCzNxLpVAXvNk",
+            "Elizabeth": "MF3mGyEYCl7XYWbV9V6O",
+            "Shelley": "DWAVQCwqGrmKZMpKIqGa",
+            "Dan": "TxGEqnHWrfWFTfGW9XjX",
+            "Nathaniel": "N2lVS1w4EtoT3dr4eOWO"
         }
+        # Will be populated with actual voice IDs from user's account
+        self.voice_id_map = {}
+        self._voices_fetched = False
+    
+    async def _fetch_voices_from_api(self):
+        """Fetch available voices from ElevenLabs API and map them by name"""
+        if self._voices_fetched:
+            return
+        
+        try:
+            headers = {"xi-api-key": self.api_key}
+            voices_url = "https://api.elevenlabs.io/v1/voices"
+            
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
+                async with session.get(
+                    voices_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        voices_data = await response.json()
+                        # Map voice names to their IDs
+                        for voice in voices_data.get("voices", []):
+                            voice_name = voice.get("name", "")
+                            voice_id = voice.get("voice_id", "")
+                            if voice_name and voice_id:
+                                self.voice_id_map[voice_name] = voice_id
+                        
+                        # If we found voices, use them; otherwise fall back to hardcoded IDs
+                        if not self.voice_id_map:
+                            print("Warning: No voices found from API, using fallback IDs")
+                            self.voice_id_map = self.fallback_voice_id_map.copy()
+                        else:
+                            print(f"Successfully fetched {len(self.voice_id_map)} voices from ElevenLabs API")
+                            # Also check if any expected voices are missing
+                            missing_voices = set(self.fallback_voice_id_map.keys()) - set(self.voice_id_map.keys())
+                            if missing_voices:
+                                print(f"Warning: Some expected voices not found in account: {missing_voices}")
+                    else:
+                        print(f"Failed to fetch voices from API (status {response.status}), using fallback IDs")
+                        self.voice_id_map = self.fallback_voice_id_map.copy()
+        except Exception as e:
+            print(f"Error fetching voices from API: {e}, using fallback IDs")
+            self.voice_id_map = self.fallback_voice_id_map.copy()
+        
+        self._voices_fetched = True
     
     async def generate_speech(self, request: TTSRequest) -> TTSResult:
         """Generate speech using ElevenLabs TTS API"""
         start_time = time.time()
+        
+        # Fetch voices from API if not already fetched
+        if not self._voices_fetched:
+            await self._fetch_voices_from_api()
         
         # Validate request
         is_valid, error_msg = self.validate_request(request)
@@ -876,8 +512,31 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
                 metadata={}
             )
         
-        # Get voice ID from friendly name
-        voice_id = self.voice_id_map.get(request.voice, request.voice)
+        # Validate voice exists in supported voices
+        if request.voice not in self.config.supported_voices:
+            return TTSResult(
+                success=False,
+                audio_data=None,
+                latency_ms=0,
+                file_size_bytes=0,
+                error_message=f"Voice '{request.voice}' not in supported voices: {self.config.supported_voices}",
+                metadata={"provider": self.provider_id}
+            )
+        
+        # Get voice ID from map - try fetched IDs first, then fallback
+        voice_id = self.voice_id_map.get(request.voice)
+        if not voice_id:
+            # Try fallback map
+            voice_id = self.fallback_voice_id_map.get(request.voice)
+            if not voice_id:
+                return TTSResult(
+                    success=False,
+                    audio_data=None,
+                    latency_ms=0,
+                    file_size_bytes=0,
+                    error_message=f"Voice '{request.voice}' not found in your ElevenLabs account. Available voices: {list(self.voice_id_map.keys())}",
+                    metadata={"provider": self.provider_id, "available_voices": list(self.voice_id_map.keys())}
+                )
         
         headers = {
             "xi-api-key": self.api_key,
@@ -898,7 +557,7 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
         url = f"{self.config.base_url}/{voice_id}"
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     url,
                     headers=headers,
@@ -911,6 +570,15 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
                     if response.status == 200:
                         # ElevenLabs returns audio data directly
                         audio_data = await response.read()
+                        if len(audio_data) == 0:
+                            return TTSResult(
+                                success=False,
+                                audio_data=None,
+                                latency_ms=latency_ms,
+                                file_size_bytes=0,
+                                error_message="Empty audio response from API",
+                                metadata={"provider": self.provider_id, "voice": request.voice, "voice_id": voice_id}
+                            )
                         return TTSResult(
                             success=True,
                             audio_data=audio_data,
@@ -925,6 +593,59 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
                                 "format": "mp3_44100_128"
                             }
                         )
+                    elif response.status == 404:
+                        # Voice ID not found - try to fetch available voices and find matching voice
+                        try:
+                            async with session.get(
+                                f"{self.config.base_url.replace('/text-to-speech', '/voices')}",
+                                headers={"xi-api-key": self.api_key},
+                                timeout=aiohttp.ClientTimeout(total=10)
+                            ) as voices_response:
+                                if voices_response.status == 200:
+                                    voices_data = await voices_response.json()
+                                    # Try to find voice by name
+                                    for voice in voices_data.get("voices", []):
+                                        if voice.get("name") == request.voice:
+                                            # Found matching voice, retry with correct ID
+                                            correct_voice_id = voice.get("voice_id")
+                                            if correct_voice_id:
+                                                # Retry with correct voice ID
+                                                retry_url = f"{self.config.base_url}/{correct_voice_id}"
+                                                async with session.post(
+                                                    retry_url,
+                                                    headers=headers,
+                                                    json=payload,
+                                                    timeout=aiohttp.ClientTimeout(total=30)
+                                                ) as retry_response:
+                                                    if retry_response.status == 200:
+                                                        audio_data = await retry_response.read()
+                                                        if len(audio_data) > 0:
+                                                            return TTSResult(
+                                                                success=True,
+                                                                audio_data=audio_data,
+                                                                latency_ms=(time.time() - start_time) * 1000,
+                                                                file_size_bytes=len(audio_data),
+                                                                error_message=None,
+                                                                metadata={
+                                                                    "voice": request.voice,
+                                                                    "voice_id": correct_voice_id,
+                                                                    "model": "eleven_flash_v2_5",
+                                                                    "provider": self.provider_id,
+                                                                    "format": "mp3_44100_128"
+                                                                }
+                                                            )
+                        except:
+                            pass  # Fall through to error
+                        
+                        error_text = await response.text()
+                        return TTSResult(
+                            success=False,
+                            audio_data=None,
+                            latency_ms=latency_ms,
+                            file_size_bytes=0,
+                            error_message=f"Voice '{request.voice}' not found in your account. Voice ID {voice_id} doesn't exist. Please check your ElevenLabs account has this voice available.",
+                            metadata={"provider": self.provider_id, "voice": request.voice, "voice_id": voice_id, "status": response.status}
+                        )
                     else:
                         error_text = await response.text()
                         return TTSResult(
@@ -932,8 +653,8 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
                             audio_data=None,
                             latency_ms=latency_ms,
                             file_size_bytes=0,
-                            error_message=f"API Error {response.status}: {error_text}",
-                            metadata={"provider": self.provider_id}
+                            error_message=f"API Error {response.status}: {error_text[:200]} (Voice: {request.voice}, Voice ID: {voice_id})",
+                            metadata={"provider": self.provider_id, "voice": request.voice, "voice_id": voice_id, "status": response.status}
                         )
         
         except asyncio.TimeoutError:
@@ -942,8 +663,8 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
                 audio_data=None,
                 latency_ms=(time.time() - start_time) * 1000,
                 file_size_bytes=0,
-                error_message="Request timeout",
-                metadata={"provider": self.provider_id}
+                error_message=f"Request timeout (Voice: {request.voice})",
+                metadata={"provider": self.provider_id, "voice": request.voice}
             )
         except Exception as e:
             return TTSResult(
@@ -951,8 +672,8 @@ class ElevenLabsFlashTTSProvider(TTSProvider):
                 audio_data=None,
                 latency_ms=(time.time() - start_time) * 1000,
                 file_size_bytes=0,
-                error_message=f"Error: {str(e)}",
-                metadata={"provider": self.provider_id}
+                error_message=f"Error: {str(e)} (Voice: {request.voice}, Voice ID: {voice_id})",
+                metadata={"provider": self.provider_id, "voice": request.voice, "voice_id": voice_id}
             )
     
     def get_available_voices(self) -> list:
@@ -964,22 +685,74 @@ class ElevenLabsV3TTSProvider(TTSProvider):
     
     def __init__(self):
         super().__init__("elevenlabs_v3")
-        # Map friendly voice names to voice IDs
-        self.voice_id_map = {
-            "Rachel": "21m00Tcm4TlvDq8ikWAM",
-            "Domi": "AZnzlk1XvdvUeBnXmlld",
-            "Bella": "EXAVITQu4vr4xnSDxMaL",
-            "Antoni": "ErXwobaYiN019PkySvjV",
-            "Elli": "MF3mGyEYCl7XYWbV9V6O",
-            "Josh": "TxGEqnHWrfWFTfGW9XjX",
-            "Arnold": "VR6AewLTigWG4xSOukaG",
-            "Adam": "pNInz6obpgDQGcFmaJgB",
-            "Sam": "yoZ06aMxZJJ28mfd3POQ"
+        # Map friendly voice names to voice IDs (based on Artificial Analysis methodology)
+        # Only voices listed on https://artificialanalysis.ai/text-to-speech/methodology
+        # Turbo v2.5: Laura, Jessica, Jarnathan, Liam, Elizabeth, Shelley, Dan, Nathaniel
+        # Fallback voice IDs (from Artificial Analysis - may not work for all accounts)
+        self.fallback_voice_id_map = {
+            "Laura": "FGY2WhTYpPnrIDTdsKH5",
+            "Jessica": "cgSgspJ2msm6clMCkdW9",
+            "Liam": "TX3LPaxmHKxFdv7VOQHJ",
+            "Jarnathan": "P5pyBRCcCzNxLpVAXvNk",
+            "Elizabeth": "MF3mGyEYCl7XYWbV9V6O",
+            "Shelley": "DWAVQCwqGrmKZMpKIqGa",
+            "Dan": "TxGEqnHWrfWFTfGW9XjX",
+            "Nathaniel": "N2lVS1w4EtoT3dr4eOWO"
         }
+        # Will be populated with actual voice IDs from user's account
+        self.voice_id_map = {}
+        self._voices_fetched = False
+    
+    async def _fetch_voices_from_api(self):
+        """Fetch available voices from ElevenLabs API and map them by name"""
+        if self._voices_fetched:
+            return
+        
+        try:
+            headers = {"xi-api-key": self.api_key}
+            voices_url = "https://api.elevenlabs.io/v1/voices"
+            
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
+                async with session.get(
+                    voices_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        voices_data = await response.json()
+                        # Map voice names to their IDs
+                        for voice in voices_data.get("voices", []):
+                            voice_name = voice.get("name", "")
+                            voice_id = voice.get("voice_id", "")
+                            if voice_name and voice_id:
+                                self.voice_id_map[voice_name] = voice_id
+                        
+                        # If we found voices, use them; otherwise fall back to hardcoded IDs
+                        if not self.voice_id_map:
+                            print("Warning: No voices found from API, using fallback IDs")
+                            self.voice_id_map = self.fallback_voice_id_map.copy()
+                        else:
+                            print(f"Successfully fetched {len(self.voice_id_map)} voices from ElevenLabs API")
+                            # Also check if any expected voices are missing
+                            missing_voices = set(self.fallback_voice_id_map.keys()) - set(self.voice_id_map.keys())
+                            if missing_voices:
+                                print(f"Warning: Some expected voices not found in account: {missing_voices}")
+                    else:
+                        print(f"Failed to fetch voices from API (status {response.status}), using fallback IDs")
+                        self.voice_id_map = self.fallback_voice_id_map.copy()
+        except Exception as e:
+            print(f"Error fetching voices from API: {e}, using fallback IDs")
+            self.voice_id_map = self.fallback_voice_id_map.copy()
+        
+        self._voices_fetched = True
     
     async def generate_speech(self, request: TTSRequest) -> TTSResult:
         """Generate speech using ElevenLabs v3 TTS API"""
         start_time = time.time()
+        
+        # Fetch voices from API if not already fetched
+        if not self._voices_fetched:
+            await self._fetch_voices_from_api()
         
         # Validate request
         is_valid, error_msg = self.validate_request(request)
@@ -993,8 +766,19 @@ class ElevenLabsV3TTSProvider(TTSProvider):
                 metadata={}
             )
         
-        # Get voice ID from friendly name
-        voice_id = self.voice_id_map.get(request.voice, request.voice)
+        # Get voice ID from map - try fetched IDs first, then fallback
+        voice_id = self.voice_id_map.get(request.voice)
+        if not voice_id:
+            voice_id = self.fallback_voice_id_map.get(request.voice)
+            if not voice_id:
+                return TTSResult(
+                    success=False,
+                    audio_data=None,
+                    latency_ms=0,
+                    file_size_bytes=0,
+                    error_message=f"Voice '{request.voice}' not found in your ElevenLabs account. Available voices: {list(self.voice_id_map.keys())}",
+                    metadata={"provider": self.provider_id, "available_voices": list(self.voice_id_map.keys())}
+                )
         
         headers = {
             "xi-api-key": self.api_key,
@@ -1015,7 +799,7 @@ class ElevenLabsV3TTSProvider(TTSProvider):
         url = f"{self.config.base_url}/{voice_id}"
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     url,
                     headers=headers,
@@ -1113,7 +897,7 @@ class OpenAITTSProvider(TTSProvider):
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     self.config.base_url,
                     headers=headers,
@@ -1233,7 +1017,7 @@ class CartesiaTTSProvider(TTSProvider):
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     self.config.base_url,
                     headers=headers,
@@ -1351,7 +1135,7 @@ class SarvamTTSProvider(TTSProvider):
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=get_connector()) as session:
                 async with session.post(
                     self.config.base_url,
                     headers=headers,
@@ -1493,13 +1277,7 @@ class TTSProviderFactory:
     @staticmethod
     def create_provider(provider_id: str) -> TTSProvider:
         """Create a TTS provider instance"""
-        if provider_id == "murf":
-            return MurfAITTSProvider()
-        elif provider_id == "murf_falcon":
-            return MurfFalconTTSProvider()
-        elif provider_id == "murf_falcon_oct13":
-            return MurfFalconOct13TTSProvider()
-        elif provider_id == "murf_falcon_oct23":
+        if provider_id == "murf_falcon_oct23":
             return MurfFalconOct23TTSProvider()
         elif provider_id == "deepgram":
             return DeepgramTTSProvider()
