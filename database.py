@@ -70,7 +70,7 @@ class BenchmarkDatabase:
             CREATE TABLE IF NOT EXISTS elo_ratings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider TEXT UNIQUE,
-                rating REAL DEFAULT 1500,
+                rating REAL DEFAULT 1000,
                 games_played INTEGER DEFAULT 0,
                 wins INTEGER DEFAULT 0,
                 losses INTEGER DEFAULT 0,
@@ -211,9 +211,9 @@ class BenchmarkDatabase:
             return result[0]
         else:
             self.init_elo_rating(provider)
-            return 1500.0
+            return 1000.0
     
-    def init_elo_rating(self, provider: str, rating: float = 1500.0):
+    def init_elo_rating(self, provider: str, rating: float = 1000.0):
         """Initialize ELO rating for a new provider"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -228,15 +228,20 @@ class BenchmarkDatabase:
         conn.close()
     
     def update_elo_ratings(self, winner: str, loser: str, k_factor: int = 32):
-        """Update ELO ratings based purely on votes - simple vote-based system
+        """Update ELO ratings using standard ELO formula
         
         IMPORTANT: This method should ONLY be called from blind test votes (user preferences).
         It should NOT be called from quick test results or benchmark comparisons based on
         technical metrics like latency or TTFB. ELO is based purely on user quality preferences.
         
-        Simple system: Each vote win = +points, each vote loss = -points
-        More votes/wins = higher ELO. Simple and straightforward.
+        Standard ELO formula:
+        - Expected score for winner: E_winner = 1 / (1 + 10^((loser_rating - winner_rating)/400))
+        - Expected score for loser: E_loser = 1 / (1 + 10^((winner_rating - loser_rating)/400))
+        - New rating = Old rating + K * (Actual score - Expected score)
+        - Winner actual score = 1, Loser actual score = 0
         """
+        import math
+        
         # Ensure both providers are initialized
         self.init_elo_rating(winner)
         self.init_elo_rating(loser)
@@ -244,10 +249,15 @@ class BenchmarkDatabase:
         winner_rating = self.get_elo_rating(winner)
         loser_rating = self.get_elo_rating(loser)
         
-        # Simple vote-based ELO: winner gains points, loser loses points
-        # No complex expected score calculations - just based on votes
-        new_winner_rating = winner_rating + k_factor  # Winner gains fixed points
-        new_loser_rating = loser_rating - k_factor     # Loser loses fixed points
+        # Calculate expected scores using EXACT standard ELO formula
+        # E_X = 1 / (1 + 10^((R_Y - R_X) / 400))
+        expected_winner = 1 / (1 + math.pow(10, (loser_rating - winner_rating) / 400))
+        expected_loser = 1 / (1 + math.pow(10, (winner_rating - loser_rating) / 400))
+        
+        # Update ratings using EXACT formula: R'_X = R_X + K(S_X - E_X)
+        # Winner: S_X = 1 (won), Loser: S_X = 0 (lost)
+        new_winner_rating = winner_rating + k_factor * (1 - expected_winner)
+        new_loser_rating = loser_rating + k_factor * (0 - expected_loser)
         
         # Ensure ratings don't go below 0
         if new_loser_rating < 0:

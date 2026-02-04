@@ -1434,11 +1434,11 @@ def display_final_results():
         provider_wins[winner] = provider_wins.get(winner, 0) + 1
         provider_losses[loser] = provider_losses.get(loser, 0) + 1
     
-    # Calculate ELO for this test session only (starting from 1500 for all)
+    # Calculate ELO for this test session only (starting from 1000 for all)
     # This ensures ELO reflects performance in this specific test, not cumulative history
     test_session_elo = {}
     for provider in set(provider_wins.keys()) | set(provider_losses.keys()):
-        test_session_elo[provider] = 1500.0  # Start all at 1500 for this test
+        test_session_elo[provider] = 1000.0  # Start all at 1000 for this test
     
     # Replay all comparisons to calculate ELO for this test session
     for r in results:
@@ -1448,11 +1448,14 @@ def display_final_results():
         winner_rating = test_session_elo[winner]
         loser_rating = test_session_elo[loser]
         
-        # Calculate expected scores
-        expected_winner = 1 / (1 + 10**((loser_rating - winner_rating) / 400))
-        expected_loser = 1 / (1 + 10**((winner_rating - loser_rating) / 400))
+        # Calculate expected scores using EXACT standard ELO formula
+        # E_X = 1 / (1 + 10^((R_Y - R_X) / 400))
+        import math
+        expected_winner = 1 / (1 + math.pow(10, (loser_rating - winner_rating) / 400))
+        expected_loser = 1 / (1 + math.pow(10, (winner_rating - loser_rating) / 400))
         
-        # Update ELO for this test session
+        # Update ELO using EXACT formula: R'_X = R_X + K(S_X - E_X)
+        # Winner: S_X = 1, Loser: S_X = 0
         k_factor = 32
         test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
         test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
@@ -1468,7 +1471,7 @@ def display_final_results():
         win_rate = (wins / total * 100) if total > 0 else 0
         
         # Use ELO from this test session only (not cumulative)
-        session_elo = test_session_elo.get(provider, 1500.0)
+        session_elo = test_session_elo.get(provider, 1000.0)
         
         # Samples should be from current test only (wins + losses), not cumulative database data
         samples = total
