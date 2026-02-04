@@ -319,7 +319,14 @@ class BenchmarkEngine:
         )
     
     def update_elo_ratings(self, results: List[BenchmarkResult]):
-        """Update ELO ratings based on head-to-head comparisons"""
+        """Update ELO ratings based on head-to-head comparisons
+        
+        WARNING: This method updates ELO based on latency comparisons (technical metrics).
+        This should NOT be used for the main leaderboard. The leaderboard ELO should ONLY
+        be updated from blind test votes (user quality preferences).
+        
+        This method is kept for backward compatibility but should not be called for the main ELO system.
+        """
         
         sample_results = {}
         for result in results:

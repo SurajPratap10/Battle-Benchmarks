@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.express as px
 import json
 import base64
-import time
+import time 
 from datetime import datetime
 from typing import Dict, List, Any
 
@@ -57,6 +57,12 @@ if "navigate_to" not in st.session_state:
 def get_model_name(provider: str) -> str:
     """Helper function to get model name from config"""
     return TTS_PROVIDERS.get(provider).model_name if provider in TTS_PROVIDERS else provider
+
+def get_provider_display_name(provider_id: str) -> str:
+    """Get display name for provider - shows 'Murf' instead of 'Murf Falcon Oct 23'"""
+    if provider_id in TTS_PROVIDERS:
+        return TTS_PROVIDERS[provider_id].name
+    return provider_id.title()
 
 def get_location_display(result: BenchmarkResult = None, country: str = None, city: str = None) -> str:
     """Helper function to format location display with flag"""
@@ -156,12 +162,6 @@ def main():
         }
     }
     </style>
-    <div class="feature-banner">
-        <span class="new-badge">LIVE NOW</span>
-        <p class="feature-text">
-            <strong>Streaming Race</strong>
-        </p>
-    </div>
     """, unsafe_allow_html=True)
     
     st.title("TTS Benchmarking Tool")
@@ -172,7 +172,7 @@ def main():
         
         st.subheader("Navigator")
         
-        pages = ["Leaderboard", "Quick Test", "Blind Test", "Streaming Race", "Batch Benchmark", "Results Analysis", "ROI Calculator"]
+        pages = ["Leaderboard", "Quick Test", "Blind Test"]
         
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
@@ -194,10 +194,15 @@ def main():
         if config_status["valid"]:
             for provider_id, status in config_status["providers"].items():
                 provider_name = TTS_PROVIDERS[provider_id].name
-                if status["configured"]:
-                    st.write(f"🟢 {provider_name}")
+                # Show "Murf Falcon" in configuration sidebar for Murf
+                if provider_id == "murf_falcon_oct23":
+                    display_name = "Murf Falcon"
                 else:
-                    st.write(f"🔴 {provider_name}")
+                    display_name = provider_name
+                if status["configured"]:
+                    st.write(f"🟢 {display_name}")
+                else:
+                    st.write(f"🔴 {display_name}")
         else:
             st.error("❌ No API keys configured")
             st.markdown("**Set at least one API key:**")
@@ -205,28 +210,25 @@ def main():
                 if not status["configured"]:
                     env_var = TTS_PROVIDERS[provider_id].api_key_env
                     provider_name = TTS_PROVIDERS[provider_id].name
+                    # Show "Murf Falcon" in configuration sidebar for Murf
+                    if provider_id == "murf_falcon_oct23":
+                        display_name = "Murf Falcon"
+                    else:
+                        display_name = provider_name
                     st.code(f"export {env_var}=your_api_key_here")
-                    st.caption(f"For {provider_name}")
+                    st.caption(f"For {display_name}")
     
     if page == "Quick Test":
         quick_test_page()
     elif page == "Blind Test":
         blind_test_page()
-    elif page == "Streaming Race":
-        streaming_race_page()
-    elif page == "Batch Benchmark":
-        batch_benchmark_page()
-    elif page == "Results Analysis":
-        results_analysis_page()
     elif page == "Leaderboard":
         leaderboard_page()
-    elif page == "ROI Calculator":
-        roi_calculator_page() 
 
 def quick_test_page():
     """Quick test page for single TTS comparisons"""
     
-    st.header("🔥 Quick Test")
+    st.header("Quick Test")
     st.markdown("Test a single text prompt across multiple TTS providers")
     
     if "quick_test_results" not in st.session_state:
@@ -256,12 +258,34 @@ def quick_test_page():
     
     word_count = len(text_input.split())
     
-    selected_providers = st.multiselect(
+    # Create display names for multiselect
+    provider_display_options = []
+    for p in configured_providers:
+        # Show "Murf Falcon" in quick test dropdown for Murf
+        if p == "murf_falcon_oct23":
+            display_name = "Murf Falcon"
+        else:
+            display_name = get_provider_display_name(p)
+        provider_display_options.append(display_name)
+    
+    selected_display_names = st.multiselect(
         "Select providers:",
-        configured_providers,
-        default=configured_providers,
-        help=f"Available providers: {', '.join([TTS_PROVIDERS[p].name for p in configured_providers])}"
+        provider_display_options,
+        default=provider_display_options,
+        help=f"Available providers: {', '.join(provider_display_options)}"
     )
+    
+    # Map back to provider IDs
+    selected_providers = []
+    for display_name in selected_display_names:
+        for p in configured_providers:
+            # Handle "Murf Falcon" mapping
+            if display_name == "Murf Falcon" and p == "murf_falcon_oct23":
+                selected_providers.append(p)
+                break
+            elif get_provider_display_name(p) == display_name:
+                selected_providers.append(p)
+                break
         
     voice_options = {}
     if selected_providers:
@@ -272,8 +296,13 @@ def quick_test_page():
             for j, provider in enumerate(selected_providers[i:i+4]):
                 with cols[j]:
                     voices = TTS_PROVIDERS[provider].supported_voices
+                    # Show "Murf Falcon" in quick test dropdown for Murf
+                    if provider == "murf_falcon_oct23":
+                        provider_display = "Murf Falcon"
+                    else:
+                        provider_display = get_provider_display_name(provider)
                     voice_options[provider] = st.selectbox(
-                        f"{provider.title()} voice:",
+                        f"{provider_display} voice:",
                         voices,
                         key=f"voice_{provider}"
                     )
@@ -353,12 +382,13 @@ def run_quick_test(text: str, providers: List[str], voice_options: Dict[str, str
 def display_quick_test_results(results: List[BenchmarkResult]):
     """Display quick test results"""
     
-    st.subheader("📊 Test Results")
+    st.subheader("Test Results")
     
     data = []
     for result in results:
+        provider_display = get_provider_display_name(result.provider)
         data.append({
-            "Provider": result.provider.title(),
+            "Provider": provider_display,
             "Model": result.model_name,
             "Location": get_location_display(result),
             "Success": "✅" if result.success else "❌",
@@ -378,7 +408,7 @@ def display_quick_test_results(results: List[BenchmarkResult]):
         
         with col1:
             fig_ttfb = px.bar(
-                x=[r.provider.title() for r in successful_results],
+                x=[get_provider_display_name(r.provider) for r in successful_results],
                 y=[r.ttfb for r in successful_results],
                 title="TTFB Comparison",
                 labels={"x": "Provider", "y": "TTFB (ms)"}
@@ -387,14 +417,14 @@ def display_quick_test_results(results: List[BenchmarkResult]):
         
         with col2:
             fig_size = px.bar(
-                x=[r.provider.title() for r in successful_results],
+                x=[get_provider_display_name(r.provider) for r in successful_results],
                 y=[r.file_size_bytes / 1024 for r in successful_results],
                 title="File Size Comparison",
                 labels={"x": "Provider", "y": "File Size (KB)"}
             )
             st.plotly_chart(fig_size, use_container_width=True)
     
-    st.subheader("🎧 Audio Playback")
+    st.subheader("Audio Playback")
     
     if len(successful_results) >= 1:
         st.markdown("**Listen to the audio samples:**")
@@ -403,7 +433,8 @@ def display_quick_test_results(results: List[BenchmarkResult]):
             cols = st.columns(4)
             for j, result in enumerate(successful_results[i:i+4]):
                 with cols[j]:
-                    st.markdown(f"**{result.provider.title()}**")
+                    provider_display = get_provider_display_name(result.provider)
+                    st.markdown(f"**{provider_display}**")
                     st.caption(f"Model: {result.model_name}")
                     
                     if result.audio_data:
@@ -426,10 +457,10 @@ def display_quick_test_results(results: List[BenchmarkResult]):
                         )
 
 def blind_test_page():
-    """Blind test page for unbiased audio quality comparison"""
+    """Blind test page for unbiased audio quality comparison - Voice Battles style"""
     
-    st.header("🎯 Blind Test")
-    st.markdown("Compare TTS audio quality without knowing which provider generated each sample")
+    st.header("Voice Battles - Blind Test")
+    st.markdown("Compare TTS providers head-to-head. Listen to at least 3 seconds of each sample before voting.")
     
     config_status = check_configuration()
     
@@ -446,57 +477,1062 @@ def blind_test_page():
         st.warning("⚠️ Blind test requires at least 2 configured providers. Please configure more API keys.")
         return
     
-    if "blind_test_samples" not in st.session_state:
-        st.session_state.blind_test_samples = []
+    # Initialize session state for progressive blind test
+    if "blind_test_sentences" not in st.session_state:
+        st.session_state.blind_test_sentences = []
+    if "blind_test_current_pair" not in st.session_state:
+        st.session_state.blind_test_current_pair = None
+    if "blind_test_comparison_count" not in st.session_state:
+        st.session_state.blind_test_comparison_count = 0
+    if "blind_test_max_comparisons" not in st.session_state:
+        st.session_state.blind_test_max_comparisons = 25
+    if "blind_test_results_history" not in st.session_state:
+        st.session_state.blind_test_results_history = []
+    if "blind_test_selected_competitors" not in st.session_state:
+        st.session_state.blind_test_selected_competitors = []
+    if "blind_test_murf_voice" not in st.session_state:
+        st.session_state.blind_test_murf_voice = None
+    if "blind_test_gender_filter" not in st.session_state:
+        st.session_state.blind_test_gender_filter = "female"
+    if "blind_test_setup_complete" not in st.session_state:
+        st.session_state.blind_test_setup_complete = False
+    if "blind_test_audio_played" not in st.session_state:
+        st.session_state.blind_test_audio_played = {"A": 0, "B": 0}
+    if "show_final_results" not in st.session_state:
+        st.session_state.show_final_results = False
     
-    if "blind_test_results" not in st.session_state:
-        st.session_state.blind_test_results = []
+    # If final results should be shown, display them directly
+    if st.session_state.get("show_final_results", False):
+        display_final_results()
+        return
     
-    if "blind_test_voted" not in st.session_state:
-        st.session_state.blind_test_voted = False
+    # Show setup or comparison view
+    # Preserve test state: if test is in progress, show comparison view (even if error occurred)
+    # This ensures that if user navigates away and comes back, they continue where they left off
+    test_in_progress = (
+        st.session_state.blind_test_setup_complete or 
+        st.session_state.blind_test_comparison_count > 0 or 
+        st.session_state.blind_test_current_pair is not None or
+        len(st.session_state.blind_test_results_history) > 0
+    )
     
-    if "blind_test_vote_choice" not in st.session_state:
-        st.session_state.blind_test_vote_choice = None
+    if test_in_progress:
+        # Test is in progress - show comparison view (will handle errors gracefully)
+        display_blind_test_comparison()
+    else:
+        # No test in progress - show setup
+        display_blind_test_setup(configured_providers)
+
+def display_blind_test_setup(configured_providers: List[str]):
+    """Display the blind test setup page"""
+    from config import get_voices_by_gender, get_voice_gender
+    import random
     
-    st.subheader("⚙️ Test Setup")
+    # Get Murf providers and other providers
+    murf_providers = [p for p in configured_providers if "murf" in p.lower()]
+    other_providers = [p for p in configured_providers if "murf" not in p.lower()]
     
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns(2)
     
     with col1:
-        text_input = st.text_area(
-            "Enter text to test:",
-            value="The quick brown fox jumps over the lazy dog. This is a test of speech synthesis quality.",
-            height=100,
-            max_chars=500
-        )
+        st.markdown("**1. Select Competitor**")
         
-        word_count = len(text_input.split())
+        # Create dropdown options for competitors
+        competitor_options = []
+        competitor_ids = []
+        for provider_id in other_providers:
+            provider_name = TTS_PROVIDERS[provider_id].name
+            model_name = TTS_PROVIDERS[provider_id].model_name
+            competitor_options.append(f"{provider_name} ({model_name})")
+            competitor_ids.append(provider_id)
+        
+        if competitor_options:
+            selected_competitor_display = st.selectbox(
+                "Test Murf against:",
+                competitor_options,
+                key="competitor_select"
+            )
+            
+            # Map back to provider ID
+            selected_idx = competitor_options.index(selected_competitor_display)
+            selected_competitor_id = competitor_ids[selected_idx]
+            st.session_state.blind_test_selected_competitors = [selected_competitor_id]
+            
+            # Show competitor voice info
+            competitor_voice_info = TTS_PROVIDERS[selected_competitor_id].voice_info
+            female_count = sum(1 for v in competitor_voice_info.values() if v.gender == "female")
+            male_count = sum(1 for v in competitor_voice_info.values() if v.gender == "male")
+            st.caption(f"Available voices: {female_count} female, {male_count} male")
+        else:
+            st.warning("No competitors configured")
+        
+        # Test Parameters below competitor dropdown (uses empty space)
+        st.markdown("**Test Parameters**")
+        max_comparisons = st.slider(
+            "Number of comparisons:",
+            min_value=5,
+            max_value=50,
+            value=25,
+            step=5,
+            help="How many head-to-head comparisons to run"
+        )
+        st.session_state.blind_test_max_comparisons = max_comparisons
     
     with col2:
-        st.markdown("""
-        **How Blind Testing Works:**
-        1. Enter text to synthesize
-        2. Audio generated from all providers
-        3. Samples randomized (labeled A, B, etc.)
-        4. Listen and vote for your favorite
-        5. Results revealed after voting
-        """)
-    
-    if st.button("Generate Blind Test", type="primary"):
-        if text_input and len(configured_providers) >= 2:
-            valid, error_msg = session_manager.validate_request(text_input)
-            if valid:
-                generate_blind_test_samples(text_input, configured_providers)
-            else:
-                st.error(f"❌ {error_msg}")
+        st.markdown("**2. Select Murf Voice**")
+        
+        # Murf provider dropdown
+        if murf_providers:
+            murf_options = []
+            murf_ids = []
+            for p in murf_providers:
+                murf_options.append(f"{TTS_PROVIDERS[p].name} ({TTS_PROVIDERS[p].model_name})")
+                murf_ids.append(p)
+            
+            selected_murf_display = st.selectbox(
+                "Provider:",
+                murf_options,
+                key="murf_provider_select"
+            )
+            
+            selected_murf_idx = murf_options.index(selected_murf_display)
+            murf_provider = murf_ids[selected_murf_idx]
+            st.session_state.blind_test_murf_provider = murf_provider
+            
+            murf_voice_info = TTS_PROVIDERS[murf_provider].voice_info
+            
+            # Initialize gender filter if not set
+            if "blind_test_gender_filter" not in st.session_state:
+                st.session_state.blind_test_gender_filter = "female"
+            
+            # Gender selection - text labels side by side using radio
+            selected_gender_radio = st.radio(
+                "**Gender:**",
+                ["Male", "Female"],
+                index=0 if st.session_state.blind_test_gender_filter == "female" else 1,
+                horizontal=True,
+                key="gender_radio"
+            )
+            
+            new_gender = selected_gender_radio.lower()
+            selected_gender = st.session_state.blind_test_gender_filter
+            
+            # Only update if gender actually changed (not on every rerun)
+            if new_gender != selected_gender:
+                st.session_state.blind_test_gender_filter = new_gender
+                # Reset voice to first voice of new gender only when gender changes
+                filtered_voices_new = [(v, info) for v, info in murf_voice_info.items() if info.gender == new_gender]
+                if filtered_voices_new:
+                    st.session_state.blind_test_murf_voice = filtered_voices_new[0][0]
+                selected_gender = new_gender
+            
+            # Filter voices by selected gender
+            filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == selected_gender]
+            
+            # Initialize voice if not set or if current voice is not valid for selected gender
+            if "blind_test_murf_voice" not in st.session_state:
+                if filtered_voices:
+                    st.session_state.blind_test_murf_voice = filtered_voices[0][0]
+            elif st.session_state.blind_test_murf_voice not in [v for v, _ in filtered_voices]:
+                # Current voice doesn't match gender, reset to first voice of current gender
+                if filtered_voices:
+                    st.session_state.blind_test_murf_voice = filtered_voices[0][0]
+            
+            # Voice dropdown
+            voice_options = [f"{info.name} ({info.accent})" for v, info in filtered_voices]
+            voice_ids = [v for v, info in filtered_voices]
+            
+            if voice_options:
+                # Find current selection index
+                current_voice_id = st.session_state.blind_test_murf_voice
+                if current_voice_id in voice_ids:
+                    current_idx = voice_ids.index(current_voice_id)
+                else:
+                    # Fallback to first voice if current not found
+                    current_idx = 0
+                    st.session_state.blind_test_murf_voice = voice_ids[0]
+                
+                # Use stable key that persists across reruns
+                selected_voice_display = st.selectbox(
+                    "Voice:",
+                    voice_options,
+                    index=current_idx,
+                    key="voice_select"
+                )
+                
+                # Update session state with selected voice
+                selected_voice_idx = voice_options.index(selected_voice_display)
+                st.session_state.blind_test_murf_voice = voice_ids[selected_voice_idx]
+            
+            # Show selected voice info
+            selected_info = murf_voice_info.get(st.session_state.blind_test_murf_voice)
+            if selected_info:
+                st.caption(f"Selected: **{selected_info.name}** • Will compare with {selected_gender} voices")
         else:
-            st.error("Please enter text. At least 2 providers must be configured.")
+            st.warning("No Murf provider configured")
     
-    if st.session_state.blind_test_samples:
-        display_blind_test_samples()
+    st.divider()
+    
+    # Sentence upload section - full width
+    st.markdown("**3. Upload Test Sentences** (System will pick randomly)")
+    
+    sentences_text = st.text_area(
+        "Enter sentences (one per line):",
+        value="""The quick brown fox jumps over the lazy dog.
+The wine glass fills again and laughter breaks through the pressure that had been building quietly for hours.
+Just to confirm, the co-applicant's name is spelled M-A-R-I-S-A, correct?
+Scientists have made a groundbreaking discovery that could revolutionize renewable energy.
+Hello, how can I assist you today with your account inquiry?""",
+        height=200,
+        help="Enter multiple sentences, one per line. The system will randomly select sentences for each test."
+    )
+    
+    sentences = [s.strip() for s in sentences_text.strip().split('\n') if s.strip()]
+    
+    # Check if sentences have changed - if so, clear current pair to force regeneration
+    if "blind_test_sentences_hash" not in st.session_state:
+        st.session_state.blind_test_sentences_hash = None
+    
+    import hashlib
+    sentences_hash = hashlib.md5(str(sorted(sentences)).encode()).hexdigest()
+    
+    # If sentences changed and there's a current pair, clear it
+    if (st.session_state.blind_test_sentences_hash is not None and 
+        st.session_state.blind_test_sentences_hash != sentences_hash and
+        st.session_state.blind_test_current_pair is not None):
+        st.session_state.blind_test_current_pair = None
+        st.session_state.blind_test_comparison_count = 0
+        st.session_state.blind_test_results_history = []
+    
+    st.session_state.blind_test_sentences = sentences
+    st.session_state.blind_test_sentences_hash = sentences_hash
+    st.caption(f"📝 {len(sentences)} sentences loaded")
+    
+    can_start = (
+        len(st.session_state.get("blind_test_selected_competitors", [])) >= 1 and 
+        st.session_state.blind_test_murf_voice and 
+        len(st.session_state.blind_test_sentences) >= 1
+    )
+    
+    # Center the button and make it smaller
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("Start Voice Battle", type="primary", disabled=not can_start):
+            st.session_state.blind_test_setup_complete = True
+            st.session_state.blind_test_comparison_count = 0
+            st.session_state.blind_test_results_history = []
+            st.session_state.blind_test_current_pair = None  # Clear any existing pair
+            st.rerun()
+    
+    if not can_start:
+        st.caption("Select a competitor and ensure sentences are loaded")
+
+
+def display_blind_test_comparison():
+    """Display the active blind test comparison"""
+    from config import get_voices_by_gender, get_voice_gender
+    import random
+    
+    # Check if we should show final results (either completed or user clicked End Test)
+    if st.session_state.get("show_final_results", False):
+        # Clear the comparison view first to ensure full-width display
+        st.session_state.blind_test_current_pair = None
+        # Display full-width final results
+        display_final_results()
+        return
+    
+    # Check if we need to generate a new pair
+    force_regen = st.session_state.get("force_regenerate", False)
+    if st.session_state.blind_test_current_pair is None or force_regen:
+        # Clear the force flag
+        st.session_state.force_regenerate = False
+        # Force clear any cached audio state before generating new comparison
+        if "blind_test_audio_played" in st.session_state:
+            st.session_state.blind_test_audio_played = {"A": 0, "B": 0}
+        # CRITICAL: Clear the pair again to ensure no stale data
+        st.session_state.blind_test_current_pair = None
+        print(f"[DEBUG] Generating new comparison (force_regen={force_regen})")
+        generate_next_comparison()
+        return
+    
+    pair = st.session_state.blind_test_current_pair
+    
+    # Validate that the current pair's text is still in the sentences list
+    # If sentences were changed, the pair might have old text - regenerate it
+    if pair and pair.get("text"):
+        current_text = pair.get("text")
+        sentences = st.session_state.get("blind_test_sentences", [])
+        if sentences and current_text not in sentences:
+            # Current pair has text that's no longer in sentences - regenerate
+            st.session_state.blind_test_current_pair = None
+            generate_next_comparison()
+            return
+        
+        # Additional validation: Check if this pair was generated with a different comparison count
+        # This ensures we don't show stale audio from a previous comparison
+        pair_comparison_id = pair.get("comparison_id", "")
+        expected_comparison_id = f"{st.session_state.blind_test_comparison_count}_"
+        if pair_comparison_id and not pair_comparison_id.startswith(expected_comparison_id):
+            # Pair is from a different comparison - regenerate
+            st.session_state.blind_test_current_pair = None
+            generate_next_comparison()
+            return
+    
+    if pair is None or pair.get("error"):
+        error_msg = pair.get("message", "Failed to generate comparison.") if pair else "Failed to generate comparison."
+        st.error(f"⚠️ {error_msg}")
+        if st.button("🔄 Retry", type="primary"):
+            st.session_state.blind_test_current_pair = None
+            st.rerun()
+        return
+    
+    # Create unique key for this comparison using generation timestamp
+    generated_at = pair.get("generated_at", 0)
+    comparison_key = f"{st.session_state.blind_test_comparison_count}_{int(generated_at)}"
+    
+    # CRITICAL DEBUG: Log what we're about to display
+    print(f"[DISPLAY DEBUG] Displaying pair:")
+    print(f"  - Text: '{pair['text'][:60]}...'")
+    print(f"  - Comparison key: {comparison_key}")
+    print(f"  - Generated at: {generated_at}")
+    if pair.get('sample_a') and hasattr(pair['sample_a'], 'text'):
+        print(f"  - Sample A text: '{pair['sample_a'].text[:60] if pair['sample_a'].text else 'N/A'}...'")
+    if pair.get('sample_b') and hasattr(pair['sample_b'], 'text'):
+        print(f"  - Sample B text: '{pair['sample_b'].text[:60] if pair['sample_b'].text else 'N/A'}...'")
+    
+    # Progress indicator
+    progress = st.session_state.blind_test_comparison_count / st.session_state.blind_test_max_comparisons
+    st.progress(progress)
+    st.caption(f"Comparison {st.session_state.blind_test_comparison_count + 1} of {st.session_state.blind_test_max_comparisons}")
+    
+    # Display the prompt/sentence - sleek gray design (no purple border)
+    st.markdown(f"""
+    <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin: 8px 0;">
+        <span style="color: #666; font-size: 0.85em; font-weight: 500;">PROMPT</span>
+        <p style="color: #333; font-size: 1em; margin: 4px 0 0 0; line-height: 1.5;">{pair['text']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<p style='color: #888; font-size: 0.9em; margin: 16px 0 8px 0;'>Vote to reveal your model preference</p>", unsafe_allow_html=True)
+    
+    # Audio players side by side with unique keys
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        display_audio_player(pair['sample_a'], "A", "left", comparison_key)
+        # Add spacing and center the button
+        st.markdown('<div style="margin-top: 16px;"></div>', unsafe_allow_html=True)
+        button_col1, button_col2, button_col3 = st.columns([1, 2, 1])
+        with button_col2:
+            if st.button("Vote A", type="primary", key="vote_a", use_container_width=True):
+                handle_vote("A", pair)
+    
+    with col2:
+        # Validate audio text matches displayed text before displaying
+        sample_b = pair['sample_b']
+        if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+            audio_text = sample_b.metadata.get('generated_text', '')
+            if audio_text and audio_text != pair['text']:
+                st.error(f"⚠️ Audio text mismatch detected! Regenerating...")
+                st.session_state.blind_test_current_pair = None
+                st.rerun()
+                return
+        display_audio_player(pair['sample_b'], "B", "right", comparison_key)
+        # Add spacing and center the button
+        st.markdown('<div style="margin-top: 16px;"></div>', unsafe_allow_html=True)
+        button_col1, button_col2, button_col3 = st.columns([1, 2, 1])
+        with button_col2:
+            if st.button("Vote B", type="primary", key="vote_b", use_container_width=True):
+                handle_vote("B", pair)
+    
+    st.divider()
+    
+    # Action button - End Test only (centered, medium size)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("End Test", use_container_width=True, type="secondary"):
+            # Set flag to show final results, but keep setup_complete True so we stay in comparison view
+            st.session_state.show_final_results = True
+            st.session_state.blind_test_current_pair = None
+            st.rerun()
+            return
+
+
+def display_audio_player(result, label: str, side: str, unique_key: str = ""):
+    """Display an audio player using Streamlit's native audio component"""
+    import time
+    
+    has_audio = (result and 
+                 hasattr(result, 'audio_data') and 
+                 result.audio_data and 
+                 hasattr(result, 'success') and 
+                 result.success)
+    
+    if not has_audio:
+        error_msg = ""
+        if result and hasattr(result, 'error_message') and result.error_message:
+            error_msg = f": {result.error_message}"
+        st.error(f"Sample {label} failed to generate{error_msg}")
+        return
+    
+    # CRITICAL DEBUG: Log audio data info
+    audio_size = len(result.audio_data) if result.audio_data else 0
+    text_in_result = result.text if hasattr(result, 'text') else 'N/A'
+    print(f"[AUDIO DEBUG] Sample {label}: size={audio_size} bytes, text='{text_in_result[:50] if text_in_result != 'N/A' else 'N/A'}...'")
+    
+    # Display label
+    st.markdown(f"**Sample {label}**")
+    
+    # Use Streamlit's native audio component - this avoids browser caching issues
+    st.audio(result.audio_data, format="audio/mp3")
+
+
+def generate_next_comparison():
+    """Generate the next comparison pair - ALWAYS generates fresh audio"""
+    from config import get_voices_by_gender, get_voice_gender
+    import random
+    import time
+    
+    print(f"[GENERATE DEBUG] Starting generate_next_comparison for comparison #{st.session_state.blind_test_comparison_count}")
+    
+    # Check if we've reached max comparisons
+    if st.session_state.blind_test_comparison_count >= st.session_state.blind_test_max_comparisons:
+        st.session_state.show_final_results = True
+        st.rerun()
+        return
+    
+    # FORCE CLEAR any existing pair first to prevent stale audio
+    st.session_state.blind_test_current_pair = None
+    
+    # Generate a unique generation ID for this comparison
+    generation_id = f"gen_{int(time.time() * 1000)}_{st.session_state.blind_test_comparison_count}"
+    print(f"[GENERATE DEBUG] Generation ID: {generation_id}")
+    
+    # Get a random sentence
+    sentences = st.session_state.blind_test_sentences
+    if not sentences:
+        st.error("No sentences available")
+        return
+    
+    # CRITICAL: Track which sentences have been used to ensure variety
+    if "used_sentences" not in st.session_state:
+        st.session_state.used_sentences = []
+    
+    # Get available sentences (ones not used yet, or all if all have been used)
+    available_sentences = [s for s in sentences if s not in st.session_state.used_sentences]
+    
+    # If all sentences have been used, reset and start fresh
+    if not available_sentences:
+        st.session_state.used_sentences = []
+        available_sentences = sentences
+    
+    # Select a random sentence from available ones
+    text = random.choice(available_sentences)
+    
+    # Mark this sentence as used
+    st.session_state.used_sentences.append(text)
+    
+    # CRITICAL DEBUG: Log the selected text
+    print(f"[CRITICAL DEBUG] Selected sentence #{len(st.session_state.used_sentences)}: '{text[:80]}...'")
+    print(f"[CRITICAL DEBUG] Available sentences: {len(available_sentences)}, Total: {len(sentences)}")
+    
+    # Get configured Murf provider
+    config_status = check_configuration()
+    murf_providers = [
+        p for p, status in config_status["providers"].items() 
+        if status["configured"] and "murf" in p.lower()
+    ]
+    murf_provider_id = "murf_falcon_oct23" if "murf_falcon_oct23" in murf_providers else (murf_providers[0] if murf_providers else None)
+    
+    if not murf_provider_id:
+        st.error("No Murf provider configured. Please set MURF_API_KEY.")
+        return
+    
+    # Get Murf voice - KEEP IT FIXED (don't change it)
+    murf_voice = st.session_state.blind_test_murf_voice
+    gender_filter = st.session_state.blind_test_gender_filter
+    
+    # Ensure Murf voice is still valid, if not reset to first voice of selected gender
+    if murf_voice not in TTS_PROVIDERS[murf_provider_id].supported_voices:
+        murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+        filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
+        if filtered_voices:
+            murf_voice = filtered_voices[0][0]
+            st.session_state.blind_test_murf_voice = murf_voice
+    
+    # Get the selected competitor (single selection now)
+    competitors = st.session_state.blind_test_selected_competitors
+    if not competitors:
+        st.error("No competitor selected")
+        return
+    
+    competitor_id = competitors[0]  # Single competitor selected
+    
+    # Get a voice with matching gender from competitor - MUST MATCH GENDER
+    # Get the actual gender of the selected Murf voice to ensure perfect match
+    murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info.get(murf_voice)
+    if murf_voice_info:
+        actual_gender = murf_voice_info.gender
+        # Use the actual gender from the voice, not just the filter
+        gender_filter = actual_gender
+        print(f"[GENDER DEBUG] Murf voice: {murf_voice} is {actual_gender}")
+    else:
+        print(f"[GENDER DEBUG] WARNING: Could not find Murf voice info for {murf_voice}, using filter: {gender_filter}")
+    
+    # Get competitor voices matching gender - ensure they're in supported_voices too
+    competitor_voices = get_voices_by_gender(competitor_id, gender_filter)
+    print(f"[GENDER DEBUG] Competitor {competitor_id} voices matching '{gender_filter}': {competitor_voices}")
+    
+    # Additional validation: ensure voices are in supported_voices list
+    if competitor_id in TTS_PROVIDERS:
+        supported_voices_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
+        competitor_voices = [v for v in competitor_voices if v in supported_voices_set]
+    
+    # If no voices found for this gender, try to find any voice with matching gender from voice_info
+    if not competitor_voices and competitor_id in TTS_PROVIDERS:
+        competitor_voice_info = TTS_PROVIDERS[competitor_id].voice_info
+        supported_voices_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
+        competitor_voices = [
+            v for v, info in competitor_voice_info.items() 
+            if info.gender == gender_filter and v in supported_voices_set
+        ]
+    
+    # If still no voices, this is an error - competitor doesn't have voices of this gender
+    if not competitor_voices:
+        st.error(f"Competitor {TTS_PROVIDERS[competitor_id].name} doesn't have any {gender_filter} voices available. Please select a different competitor.")
+        st.session_state.blind_test_current_pair = None
+        return
+    
+    # Select from matching gender voices only
+    # If only 1 voice available, use it; otherwise randomly pick one
+    if len(competitor_voices) == 1:
+        competitor_voice = competitor_voices[0]
+        print(f"[GENDER DEBUG] Only 1 {gender_filter} voice available for competitor: {competitor_voice}")
+    else:
+        competitor_voice = random.choice(competitor_voices)
+        print(f"[GENDER DEBUG] Selected {gender_filter} voice for competitor: {competitor_voice} (from {len(competitor_voices)} options)")
+    
+    # Special handling for Cartesia providers - validate voice exists in voice_id_map
+    if competitor_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj = TTSProviderFactory.create_provider(competitor_id)
+            if hasattr(provider_obj, 'voice_id_map'):
+                if competitor_voice not in provider_obj.voice_id_map:
+                    # Voice not in map, try to find a valid one
+                    valid_voices = [v for v in competitor_voices if v in provider_obj.voice_id_map]
+                    if valid_voices:
+                        competitor_voice = random.choice(valid_voices)
+                    else:
+                        st.error(f"Voice '{competitor_voice}' not found in Cartesia voice mapping. Available voices: {list(provider_obj.voice_id_map.keys())}")
+                        st.session_state.blind_test_current_pair = None
+                        return
+        except Exception as e:
+            print(f"Warning: Could not validate Cartesia voice: {e}")
+    
+    # FINAL STRICT GENDER VERIFICATION - Ensure competitor voice gender matches Murf voice gender
+    if competitor_id in TTS_PROVIDERS:
+        selected_voice_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+        
+        # Verify gender match
+        if selected_voice_info and selected_voice_info.gender != gender_filter:
+            print(f"[GENDER DEBUG] ERROR: Gender mismatch! Expected {gender_filter}, got {selected_voice_info.gender}")
+            # Force find a voice with correct gender
+            competitor_voices = [
+                v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items() 
+                if info.gender == gender_filter and v in TTS_PROVIDERS[competitor_id].supported_voices
+            ]
+            if competitor_voices:
+                competitor_voice = competitor_voices[0]
+                selected_voice_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+                print(f"[GENDER DEBUG] Fixed! Using {competitor_voice} ({selected_voice_info.gender if selected_voice_info else 'unknown'})")
+            else:
+                st.error(f"No {gender_filter} voice available for {TTS_PROVIDERS[competitor_id].name}")
+                return
+        elif selected_voice_info:
+            print(f"[GENDER DEBUG] ✓ Verified: Competitor voice {competitor_voice} is {selected_voice_info.gender} (matches Murf's {gender_filter})")
+        
+        if not selected_voice_info:
+            # Voice not found in voice_info, find a valid one
+            competitor_voices = [
+                v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items() 
+                if info.gender == gender_filter and v in TTS_PROVIDERS[competitor_id].supported_voices
+            ]
+            if competitor_voices:
+                competitor_voice = random.choice(competitor_voices)
+            else:
+                st.error(f"Voice validation error: Could not find valid {gender_filter} voice for {TTS_PROVIDERS[competitor_id].name}")
+                return
+        elif selected_voice_info.gender != gender_filter:
+            # Gender mismatch - this should never happen, but fix it if it does
+            competitor_voices = [
+                v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items() 
+                if info.gender == gender_filter and v in TTS_PROVIDERS[competitor_id].supported_voices
+            ]
+            if competitor_voices:
+                competitor_voice = random.choice(competitor_voices)
+            else:
+                st.error(f"Gender mismatch error: Selected voice doesn't match {gender_filter} gender")
+                return
+    
+    # IMPORTANT: Murf voice stays FIXED - use the one from session state, don't change it
+    # The murf_voice is already set from the setup page and should never change during comparisons
+    
+    # FINAL GENDER CHECK LOG
+    murf_final_info = TTS_PROVIDERS[murf_provider_id].voice_info.get(murf_voice)
+    comp_final_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice) if competitor_id in TTS_PROVIDERS else None
+    print(f"[GENDER FINAL] Murf: {murf_voice} ({murf_final_info.gender if murf_final_info else '?'}) vs Competitor: {competitor_voice} ({comp_final_info.gender if comp_final_info else '?'})")
+    
+    if murf_final_info and comp_final_info and murf_final_info.gender != comp_final_info.gender:
+        print(f"[GENDER FINAL] ❌ CRITICAL ERROR: Gender mismatch detected! Aborting.")
+        st.error(f"Gender mismatch: Murf ({murf_final_info.gender}) vs Competitor ({comp_final_info.gender})")
+        return
+    else:
+        print(f"[GENDER FINAL] ✓ Gender match confirmed: {murf_final_info.gender if murf_final_info else gender_filter}")
+    
+    # Show loading placeholder while generating
+    loading_placeholder = st.empty()
+    loading_placeholder.info(f"Generating audio samples... This may take a few seconds.")
+    
+    # Generate samples (runs in parallel for speed)
+    # IMPORTANT: Log the text being used to ensure it's correct
+    print(f"[DEBUG] Generating audio for text: '{text[:50]}...' (Comparison #{st.session_state.blind_test_comparison_count})")
+    
+    try:
+        sample_a, sample_b = asyncio.run(generate_comparison_samples(
+            text, murf_provider_id, murf_voice, competitor_id, competitor_voice
+        ))
+        
+        # Validate that samples were generated with the correct text
+        if sample_a and hasattr(sample_a, 'metadata') and sample_a.metadata:
+            generated_text_a = sample_a.metadata.get('text', '')
+            if generated_text_a and generated_text_a != text:
+                print(f"[WARNING] Sample A text mismatch! Expected: '{text[:50]}', Got: '{generated_text_a[:50]}'")
+        
+        if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+            generated_text_b = sample_b.metadata.get('text', '')
+            if generated_text_b and generated_text_b != text:
+                print(f"[WARNING] Sample B text mismatch! Expected: '{text[:50]}', Got: '{generated_text_b[:50]}'")
+                
+    except Exception as e:
+        loading_placeholder.error(f"Error generating samples: {str(e)}")
+        sample_a, sample_b = None, None
+    
+    # Clear loading message
+    loading_placeholder.empty()
+    
+    # Check if either sample failed
+    if sample_a is None or sample_b is None or not (sample_a.success if sample_a else False) or not (sample_b.success if sample_b else False):
+        # Show detailed error and allow retry
+        error_msg = "Both samples failed to generate."
+        error_details = []
+        
+        if sample_a:
+            if not sample_a.success:
+                error_details.append(f"Sample A ({TTS_PROVIDERS[murf_provider_id].name}): {sample_a.error_message if hasattr(sample_a, 'error_message') and sample_a.error_message else 'Unknown error'}")
+        else:
+            error_details.append(f"Sample A ({TTS_PROVIDERS[murf_provider_id].name}): Failed to generate")
+            
+        if sample_b:
+            if not sample_b.success:
+                error_details.append(f"Sample B ({TTS_PROVIDERS[competitor_id].name}): {sample_b.error_message if hasattr(sample_b, 'error_message') and sample_b.error_message else 'Unknown error'}")
+        else:
+            error_details.append(f"Sample B ({TTS_PROVIDERS[competitor_id].name}): Failed to generate")
+        
+        if error_details:
+            error_msg = " | ".join(error_details)
+        
+        st.session_state.blind_test_current_pair = {"error": True, "message": error_msg}
+        st.rerun()
+        return
+    
+    # CRITICAL FIX: Validate text matches before storing
+    # Ensure samples were generated with the correct text
+    if sample_a and sample_a.success:
+        # Store text in metadata for validation
+        if not hasattr(sample_a, 'metadata') or sample_a.metadata is None:
+            sample_a.metadata = {}
+        sample_a.metadata['generated_text'] = text
+        sample_a.metadata['comparison_num'] = st.session_state.blind_test_comparison_count
+    
+    if sample_b and sample_b.success:
+        # Store text in metadata for validation
+        if not hasattr(sample_b, 'metadata') or sample_b.metadata is None:
+            sample_b.metadata = {}
+        sample_b.metadata['generated_text'] = text
+        sample_b.metadata['comparison_num'] = st.session_state.blind_test_comparison_count
+    
+    # Randomize order (50/50 chance Murf is A or B)
+    murf_is_a = random.random() > 0.5
+    
+    # Generate a unique timestamp for this comparison to prevent caching
+    import time
+    unique_timestamp = time.time()
+    comparison_id = f"{st.session_state.blind_test_comparison_count}_{unique_timestamp}"
+    
+    # Log for debugging
+    print(f"[DEBUG] Storing pair - Text: '{text[:60]}...', Comparison #{st.session_state.blind_test_comparison_count}")
+    
+    if murf_is_a:
+        st.session_state.blind_test_current_pair = {
+            "sample_a": sample_a, "sample_b": sample_b,
+            "provider_a": murf_provider_id, "provider_b": competitor_id,
+            "voice_a": murf_voice, "voice_b": competitor_voice,
+            "text": text, "murf_is": "A", "generated_at": unique_timestamp,
+            "comparison_id": comparison_id
+        }
+    else:
+        st.session_state.blind_test_current_pair = {
+            "sample_a": sample_b, "sample_b": sample_a,
+            "provider_a": competitor_id, "provider_b": murf_provider_id,
+            "voice_a": competitor_voice, "voice_b": murf_voice,
+            "text": text, "murf_is": "B", "generated_at": unique_timestamp,
+            "comparison_id": comparison_id
+        }
+    
+    st.session_state.blind_test_audio_played = {"A": 0, "B": 0}
+    st.rerun()
+
+
+async def generate_comparison_samples(text: str, provider_a: str, voice_a: str, provider_b: str, voice_b: str):
+    """Generate audio samples for comparison - runs both in parallel for speed"""
+    
+    # Validate voices exist in supported voices
+    if provider_a in TTS_PROVIDERS and voice_a not in TTS_PROVIDERS[provider_a].supported_voices:
+        print(f"Warning: Voice '{voice_a}' not in supported voices for {provider_a}. Available: {TTS_PROVIDERS[provider_a].supported_voices}")
+    
+    if provider_b in TTS_PROVIDERS and voice_b not in TTS_PROVIDERS[provider_b].supported_voices:
+        print(f"Warning: Voice '{voice_b}' not in supported voices for {provider_b}. Available: {TTS_PROVIDERS[provider_b].supported_voices}")
+    
+    # CRITICAL: Create TestSample with unique ID and ensure text is set correctly
+    import time
+    unique_sample_id = f"blind_comparison_{int(time.time() * 1000)}"
+    
+    sample = TestSample(
+        id=unique_sample_id,
+        text=text,  # CRITICAL: This text MUST be used for generation
+        word_count=len(text.split()),
+        category="blind_test",
+        length_category="custom",
+        complexity_score=0.5
+    )
+    
+    # CRITICAL DEBUG: Verify text is correct
+    print(f"[CRITICAL DEBUG] TestSample created with text: '{sample.text[:80]}...'")
+    assert sample.text == text, f"Text mismatch! Expected '{text[:50]}', got '{sample.text[:50]}'"
+    
+    async def generate_sample(provider_id: str, voice: str):
+        """Generate a single sample"""
+        try:
+            # CRITICAL DEBUG: Log the text being used for generation
+            print(f"[CRITICAL DEBUG] Generating for {provider_id} with text: '{sample.text[:60]}...'")
+            
+            provider_obj = TTSProviderFactory.create_provider(provider_id)
+            result = await st.session_state.benchmark_engine.run_single_test(
+                provider_obj, sample, voice
+            )
+            
+            # CRITICAL: Store the text in result metadata immediately
+            if result:
+                if not hasattr(result, 'metadata') or result.metadata is None:
+                    result.metadata = {}
+                result.metadata['text'] = sample.text
+                result.metadata['generated_text'] = sample.text
+                print(f"[CRITICAL DEBUG] Generated result for {provider_id} - text in metadata: '{result.metadata.get('text', '')[:60]}...'")
+            
+            if not result.success:
+                print(f"Sample generation failed for {provider_id} with voice {voice}: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}")
+            return result
+        except Exception as e:
+            print(f"Error generating sample ({provider_id} with voice {voice}): {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    # Run both generations in parallel for faster loading
+    results = await asyncio.gather(
+        generate_sample(provider_a, voice_a),
+        generate_sample(provider_b, voice_b),
+        return_exceptions=True
+    )
+    
+    result_a = results[0] if not isinstance(results[0], Exception) else None
+    result_b = results[1] if not isinstance(results[1], Exception) else None
+    
+    return result_a, result_b
+
+
+def handle_vote(choice: str, pair: dict):
+    """Handle a user vote from blind test and update ELO ratings
+    
+    IMPORTANT: ELO ratings should ONLY be updated from blind test votes (user preferences),
+    NOT from quick test results (latency, TTFB, etc.). Quick test is for technical metrics only.
+    """
+    from database import db
+    
+    # Prevent double voting on same comparison
+    current_comparison = st.session_state.blind_test_comparison_count
+    if st.session_state.get("last_voted_comparison") == current_comparison:
+        return  # Already voted on this comparison
+    
+    # Mark this comparison as voted
+    st.session_state.last_voted_comparison = current_comparison
+    
+    # CRITICAL FIX: Clear ALL audio-related state to force fresh generation
+    st.session_state.blind_test_current_pair = None
+    
+    # Force the next comparison to generate fresh audio
+    st.session_state.force_regenerate = True
+    
+    print(f"[VOTE DEBUG] Vote recorded. Cleared pair. Next comparison will generate fresh audio.")
+    
+    # Determine winner and loser based on choice
+    # IMPORTANT: choice "A" means sample A won, choice "B" means sample B won
+    if choice == "A":
+        winner_provider = pair["provider_a"]
+        loser_provider = pair["provider_b"]
+        winner_voice = pair["voice_a"]
+        loser_voice = pair["voice_b"]
+    else:  # choice == "B"
+        winner_provider = pair["provider_b"]
+        loser_provider = pair["provider_a"]
+        winner_voice = pair["voice_b"]
+        loser_voice = pair["voice_a"]
+    
+    # Debug: Print winner/loser to verify
+    print(f"Vote: {choice} | Winner: {winner_provider} | Loser: {loser_provider}")
+    
+    # Update ELO ratings - winner should get higher rating, loser should get lower
+    try:
+        new_winner_rating, new_loser_rating = db.update_elo_ratings(
+            winner_provider, loser_provider, k_factor=32
+        )
+        print(f"ELO Updated - Winner ({winner_provider}): {new_winner_rating:.1f}, Loser ({loser_provider}): {new_loser_rating:.1f}")
+        
+        # Save vote
+        db.save_user_vote(
+            winner_provider,
+            loser_provider,
+            pair["text"][:100],
+            session_id=f"blind_battle_{current_comparison}"
+        )
+    except Exception as e:
+        print(f"Error updating ratings: {e}")
+    
+    # Record result
+    result_record = {
+        "comparison_num": current_comparison + 1,
+        "winner": winner_provider,
+        "winner_voice": winner_voice,
+        "loser": loser_provider,
+        "loser_voice": loser_voice,
+        "text": pair["text"],
+        "murf_won": (pair["murf_is"] == choice),
+        "user_choice": choice
+    }
+    st.session_state.blind_test_results_history.append(result_record)
+    
+    # Move to next comparison
+    st.session_state.blind_test_comparison_count += 1
+    
+    # Check if we're done
+    if st.session_state.blind_test_comparison_count >= st.session_state.blind_test_max_comparisons:
+        st.session_state.show_final_results = True
+        st.session_state.blind_test_current_pair = None
+    else:
+        # Force clear the pair to ensure fresh audio generation
+        st.session_state.blind_test_current_pair = None
+        # Clear any cached audio state
+        if "blind_test_audio_played" in st.session_state:
+            st.session_state.blind_test_audio_played = {"A": 0, "B": 0}
+    
+    st.rerun()
+
+
+def display_interim_results():
+    """Display interim results during the blind test"""
+    st.subheader("Current Results")
+    
+    results = st.session_state.blind_test_results_history
+    
+    if not results:
+        st.info("No comparisons completed yet.")
+        return
+    
+    # Calculate win rates
+    provider_wins = {}
+    provider_losses = {}
+    
+    for r in results:
+        winner = r["winner"]
+        loser = r["loser"]
+        
+        provider_wins[winner] = provider_wins.get(winner, 0) + 1
+        provider_losses[loser] = provider_losses.get(loser, 0) + 1
+    
+    # Create summary table
+    all_providers = set(provider_wins.keys()) | set(provider_losses.keys())
+    summary_data = []
+    
+    for provider in all_providers:
+        wins = provider_wins.get(provider, 0)
+        losses = provider_losses.get(provider, 0)
+        total = wins + losses
+        win_rate = (wins / total * 100) if total > 0 else 0
+        
+        summary_data.append({
+            "Provider": TTS_PROVIDERS.get(provider, {}).name if provider in TTS_PROVIDERS else provider.title(),
+            "Model": get_model_name(provider),
+            "Wins": wins,
+            "Losses": losses,
+            "Win Rate": f"{win_rate:.1f}%",
+            "Samples": total
+        })
+    
+    # Sort by win rate
+    summary_data.sort(key=lambda x: float(x["Win Rate"].replace("%", "")), reverse=True)
+    
+    df = pd.DataFrame(summary_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Murf specific stats
+    murf_wins = sum(1 for r in results if r.get("murf_won", False))
+    murf_total = len(results)
+    murf_win_rate = (murf_wins / murf_total * 100) if murf_total > 0 else 0
+    
+    st.metric(
+        "Murf Win Rate",
+        f"{murf_win_rate:.1f}%",
+        delta=f"{murf_wins} wins / {murf_total} comparisons"
+    )
+    
+    if st.button("Continue Testing", type="primary"):
+        st.session_state.show_interim_results = False
+        st.rerun()
+
+
+def display_final_results():
+    """Display final results after all comparisons"""
+    st.markdown("---")
+    st.header("Final Results")
+    
+    results = st.session_state.blind_test_results_history
+    
+    if not results:
+        st.info("No comparisons completed.")
+        if st.button("Start New Test"):
+            reset_blind_test()
+        return
+    
+    # Calculate comprehensive stats
+    provider_wins = {}
+    provider_losses = {}
+    
+    for r in results:
+        winner = r["winner"]
+        loser = r["loser"]
+        
+        provider_wins[winner] = provider_wins.get(winner, 0) + 1
+        provider_losses[loser] = provider_losses.get(loser, 0) + 1
+    
+    # Calculate ELO for this test session only (starting from 1500 for all)
+    # This ensures ELO reflects performance in this specific test, not cumulative history
+    test_session_elo = {}
+    for provider in set(provider_wins.keys()) | set(provider_losses.keys()):
+        test_session_elo[provider] = 1500.0  # Start all at 1500 for this test
+    
+    # Replay all comparisons to calculate ELO for this test session
+    for r in results:
+        winner = r["winner"]
+        loser = r["loser"]
+        
+        winner_rating = test_session_elo[winner]
+        loser_rating = test_session_elo[loser]
+        
+        # Calculate expected scores
+        expected_winner = 1 / (1 + 10**((loser_rating - winner_rating) / 400))
+        expected_loser = 1 / (1 + 10**((winner_rating - loser_rating) / 400))
+        
+        # Update ELO for this test session
+        k_factor = 32
+        test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
+        test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
+    
+    # Create leaderboard
+    all_providers = set(provider_wins.keys()) | set(provider_losses.keys())
+    leaderboard_data = []
+    
+    for provider in all_providers:
+        wins = provider_wins.get(provider, 0)
+        losses = provider_losses.get(provider, 0)
+        total = wins + losses
+        win_rate = (wins / total * 100) if total > 0 else 0
+        
+        # Use ELO from this test session only (not cumulative)
+        session_elo = test_session_elo.get(provider, 1500.0)
+        
+        # Samples should be from current test only (wins + losses), not cumulative database data
+        samples = total
+        
+        leaderboard_data.append({
+            "Rank": 0,
+            "Provider": TTS_PROVIDERS.get(provider, {}).name if provider in TTS_PROVIDERS else provider.title(),
+            "Model": get_model_name(provider),
+            "ELO": round(session_elo, 1),
+            "Wins": wins,
+            "Losses": losses,
+            "Win Rate": f"{win_rate:.1f}%",
+            "Samples": samples
+        })
+    
+    # Sort by ELO and assign ranks (ELO now reflects this test session only)
+    leaderboard_data.sort(key=lambda x: x["ELO"], reverse=True)
+    for i, item in enumerate(leaderboard_data):
+        item["Rank"] = i + 1
+    
+    df = pd.DataFrame(leaderboard_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Summary metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Comparisons", len(results))
+    
+    with col2:
+        murf_wins = sum(1 for r in results if r.get("murf_won", False))
+        st.metric("Murf Wins", murf_wins)
+    
+    with col3:
+        murf_win_rate = (murf_wins / len(results) * 100) if results else 0
+        st.metric("Murf Win Rate", f"{murf_win_rate:.1f}%")
+    
+    st.divider()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Start New Test", type="primary", use_container_width=True):
+            reset_blind_test()
+    
+    with col2:
+        if st.button("View Full Leaderboard", use_container_width=True):
+            st.session_state.current_page = "Leaderboard"
+            st.rerun()
+
+
+def reset_blind_test():
+    """Reset all blind test state"""
+    st.session_state.blind_test_setup_complete = False
+    st.session_state.blind_test_current_pair = None
+    st.session_state.blind_test_comparison_count = 0
+    st.session_state.blind_test_results_history = []
+    st.session_state.show_interim_results = False
+    st.session_state.show_final_results = False
+    st.rerun()
+
 
 def generate_blind_test_samples(text: str, providers: List[str]):
-    """Generate audio samples for blind testing"""
+    """Generate audio samples for blind testing (legacy function for backward compatibility)"""
     
     import random
     
@@ -701,7 +1737,11 @@ def display_blind_test_samples():
                 st.rerun()
 
 def handle_blind_test_vote(winner_result: BenchmarkResult, loser_result: BenchmarkResult, save_vote: bool = True):
-    """Handle blind test vote and update ELO ratings"""
+    """Handle blind test vote and update ELO ratings
+    
+    IMPORTANT: This is the ONLY way ELO should be updated for the leaderboard.
+    Quick test results (latency, TTFB) should NOT affect ELO ratings.
+    """
     
     from database import db
     
@@ -724,744 +1764,110 @@ def handle_blind_test_vote(winner_result: BenchmarkResult, loser_result: Benchma
     except Exception as e:
         st.error(f"Error updating ratings: {e}")
 
-def streaming_race_page():
-    """Streaming race page - visualize real-time TTS generation"""
-    
-    st.header("⚡ Streaming Race")
-    st.markdown("Watch TTS providers race in real-time! See Time to First Byte (TTFB) for each provider.")
-    
-    config_status = check_configuration()
-    
-    if not st.session_state.config_valid:
-        st.warning("Please configure at least one API key in the sidebar first.")
-        return
-    
-    configured_providers = [
-        provider_id for provider_id, status in config_status["providers"].items() 
-        if status["configured"]
-    ]
-    
-    if len(configured_providers) < 2:
-        st.warning("⚠️ Streaming race requires at least 2 configured providers.")
-        return
-    
-    if "race_running" not in st.session_state:
-        st.session_state.race_running = False
-    
-    if "race_results" not in st.session_state:
-        st.session_state.race_results = None
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        text_input = st.text_area(
-            "Enter text to synthesize:",
-            value="The quick brown fox jumps over the lazy dog. This is a test of real-time speech synthesis speed.",
-            height=100,
-            max_chars=500
-        )
-        
-        word_count = len(text_input.split())
-        st.caption(f"Word count: {word_count}")
-    
-    with col2:
-        st.markdown("""
-        **How Streaming Race Works:**
-        1. Enter text to synthesize
-        2. Select providers to race
-        3. Click START RACE
-        4. Watch live progress bars
-        5. See TTFB and Latencies
-        """)
-    
-    default_race_providers = []
-    if "murf_falcon_oct23" in configured_providers:
-        default_race_providers.append("murf_falcon_oct23")
-    if "deepgram_aura2" in configured_providers:
-        default_race_providers.append("deepgram_aura2")
-    if len(default_race_providers) < 2:
-        default_race_providers = configured_providers[:min(2, len(configured_providers))]
-    
-    selected_providers = st.multiselect(
-        "Select providers to race (minimum 2):",
-        configured_providers,
-        default=default_race_providers,
-        help="Select 2-6 providers for the race"
-    )
-    
-    if st.button("START RACE", type="primary", disabled=len(selected_providers) < 2):
-        if text_input and len(selected_providers) >= 2:
-            valid, error_msg = session_manager.validate_request(text_input)
-            if valid:
-                st.session_state.race_running = True
-                run_streaming_race(text_input, selected_providers)
-            else:
-                st.error(f"❌ {error_msg}")
-        else:
-            st.warning("Please enter text and select at least 2 providers.")
-    
-    if st.session_state.race_results is not None:
-        display_race_results(st.session_state.race_results)
-
-def run_streaming_race(text: str, providers: List[str]):
-    """Run the streaming race with real-time tracking"""
-    
-    st.markdown("---")
-    st.subheader("🏁 Race in Progress...")
-    
-    race_placeholders = {}
-    status_placeholders = {}
-    
-    for provider_id in providers:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown(f"**{provider_id.replace('_', ' ').title()}**")
-            race_placeholders[provider_id] = st.progress(0)
-        with col2:
-            status_placeholders[provider_id] = st.empty()
-    
-    race_results = {}
-    
-    async def race_provider(provider_id: str):
-        """Race a single provider with streaming tracking"""
-        try:
-            provider = TTSProviderFactory.create_provider(provider_id)
-            
-            voices = TTS_PROVIDERS[provider_id].supported_voices
-            voice = voices[0] if voices else "default"
-            
-            sample = TestSample(
-                id="streaming_race",
-                text=text,
-                word_count=len(text.split()),
-                category="race",
-                length_category="custom",
-                complexity_score=0.5
-            )
-            
-            status_placeholders[provider_id].text(f"Starting...")
-            
-            benchmark_result = await st.session_state.benchmark_engine.run_single_test(
-                provider, sample, voice, iteration=1
-            )
-            
-            if benchmark_result.success:
-                progress_steps = 20
-                for step in range(progress_steps + 1):
-                    progress = step / progress_steps
-                    race_placeholders[provider_id].progress(progress)
-                    
-                    elapsed = (step / progress_steps) * benchmark_result.latency_ms
-                    bytes_so_far = int((step / progress_steps) * benchmark_result.file_size_bytes)
-                    
-                    if step == 0:
-                        status_placeholders[provider_id].text(f"⚡ TTFB: {benchmark_result.ttfb:.0f}ms")
-                    elif step < progress_steps:
-                        status_placeholders[provider_id].text(f"{bytes_so_far / 1024:.1f}KB")
-                    else:
-                        status_placeholders[provider_id].text(f"✅ Done: {benchmark_result.ttfb:.0f}ms")
-                    
-                    await asyncio.sleep(benchmark_result.latency_ms / progress_steps / 1000)
-                
-                race_results[provider_id] = {
-                    'success': True,
-                    'ttfb': benchmark_result.ttfb,
-                    'total_time': benchmark_result.latency_ms,
-                    'file_size': benchmark_result.file_size_bytes,
-                    'audio_data': benchmark_result.audio_data,
-                    'voice': voice,
-                    'ping': benchmark_result.latency_1,
-                    'text': text
-                }
-            else:
-                race_placeholders[provider_id].progress(0)
-                status_placeholders[provider_id].text(f"❌ Failed")
-                race_results[provider_id] = {
-                    'success': False,
-                    'error': benchmark_result.error_message
-                }
-            
-        except Exception as e:
-            race_placeholders[provider_id].progress(0)
-            status_placeholders[provider_id].text(f"❌ Error")
-            race_results[provider_id] = {
-                'success': False,
-                'error': str(e)
-            }
-    
-    async def race_all():
-        tasks = [race_provider(provider_id) for provider_id in providers]
-        await asyncio.gather(*tasks)
-    
-    asyncio.run(race_all())
-    
-    st.session_state.race_results = race_results
-    st.session_state.race_running = False
-    
-    successful_races = {k: v for k, v in race_results.items() if v.get('success')}
-    if len(successful_races) >= 2:
-        sorted_by_ttfb = sorted(successful_races.items(), key=lambda x: x[1]['ttfb'])
-        
-        winner_provider = sorted_by_ttfb[0][0]
-        for loser_provider, _ in sorted_by_ttfb[1:]:
-            try:
-                db.update_elo_ratings(winner_provider, loser_provider, k_factor=32)
-            except:
-                pass
-    
-    import time as time_module
-    time_module.sleep(0.5)
-    
-    st.rerun()
-
-def display_race_results(race_results: Dict[str, Any]):
-    """Display race results with winner and detailed metrics"""
-    
-    st.markdown("---")
-    st.subheader("🏆 Race Results")
-    
-    successful_results = {k: v for k, v in race_results.items() if v.get('success')}
-    
-    if not successful_results:
-        st.error("❌ No providers completed successfully.")
-        return
-    
-    winner = min(successful_results.items(), key=lambda x: x[1]['ttfb'])
-    winner_provider = winner[0]
-    winner_data = winner[1]
-    
-    st.success(f"**WINNER: {winner_provider.replace('_', ' ').title()}** - TTFB: {winner_data['ttfb']:.0f}ms")
-    
-    st.markdown("### 📊 Detailed Results")
-    
-    results_data = []
-    for provider, data in sorted(successful_results.items(), key=lambda x: x[1]['ttfb']):
-        text_length = len(data.get('text', ''))
-        speed = (text_length / (data['total_time'] / 1000)) if data['total_time'] > 0 else 0
-        
-        results_data.append({
-            "Rank": len(results_data) + 1,
-            "Provider": provider.replace('_', ' ').title(),
-            "Model": get_model_name(provider),
-            "TTFB (ms)": f"{data['ttfb']:.1f}",
-            "Speed (char/s)": f"{speed:.1f}",
-            "File Size (KB)": f"{data['file_size'] / 1024:.1f}"
-        })
-    
-    df = pd.DataFrame(results_data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        fig_ttfb = px.bar(
-            x=[r['Provider'] for r in results_data],
-            y=[float(r['TTFB (ms)']) for r in results_data],
-            title="Time to First Byte (TTFB)",
-            labels={"x": "Provider", "y": "TTFB (ms)"},
-            color=[float(r['TTFB (ms)']) for r in results_data],
-            color_continuous_scale="RdYlGn_r"
-        )
-        fig_ttfb.update_layout(showlegend=False)
-        st.plotly_chart(fig_ttfb, use_container_width=True)
-    
-    with col2:
-        fig_size = px.bar(
-            x=[r['Provider'] for r in results_data],
-            y=[float(r['File Size (KB)']) for r in results_data],
-            title="File Size Comparison",
-            labels={"x": "Provider", "y": "File Size (KB)"},
-            color=[float(r['File Size (KB)']) for r in results_data],
-            color_continuous_scale="Blues"
-        )
-        fig_size.update_layout(showlegend=False)
-        st.plotly_chart(fig_size, use_container_width=True)
-    
-    st.subheader("🎧 Audio Samples")
-    
-    audio_cols = st.columns(min(4, len(successful_results)))
-    for idx, (provider, data) in enumerate(sorted(successful_results.items(), key=lambda x: x[1]['ttfb'])):
-        with audio_cols[idx % 4]:
-            if provider == winner_provider:
-                st.markdown(f"**🥇 {provider.replace('_', ' ').title()}**")
-            elif idx == 1:
-                st.markdown(f"**🥈 {provider.replace('_', ' ').title()}**")
-            elif idx == 2:
-                st.markdown(f"**🥉 {provider.replace('_', ' ').title()}**")
-            else:
-                st.markdown(f"{provider.replace('_', ' ').title()}")
-            st.caption(f"TTFB: {data['ttfb']:.0f}ms")
-            
-            if data.get('audio_data'):
-                audio_base64 = base64.b64encode(data['audio_data']).decode()
-                audio_html = f"""
-                <audio controls controlsList="nodownload" style="width: 100%;">
-                    <source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg">
-                </audio>
-                """
-                st.markdown(audio_html, unsafe_allow_html=True)
-                
-                st.download_button(
-                    label="Download MP3",
-                    data=data['audio_data'],
-                    file_name=f"{provider}_race.mp3",
-                    mime="audio/mpeg",
-                    key=f"download_race_{provider}"
-                )
-    
-    st.markdown("---")
-    if st.button("Race Again", type="primary", use_container_width=True):
-        st.session_state.race_results = None
-        st.rerun()
-
-def batch_benchmark_page():
-    """Batch benchmark page for comprehensive testing"""
-    
-    st.header("⚙️ Batch Benchmark")
-    st.markdown("Run comprehensive benchmarks across multiple samples and providers")
-    
-    config_status = check_configuration()
-    
-    if not st.session_state.config_valid:
-        st.warning("Please configure at least one API key in the sidebar first.")
-        return
-    
-    configured_providers = [
-        provider_id for provider_id, status in config_status["providers"].items() 
-        if status["configured"]
-    ]
-    
-    if not configured_providers:
-        st.error("No providers are configured. Please set API keys in the sidebar.")
-        return
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Test Configuration")
-        
-        selected_providers = st.multiselect(
-            "Select providers:",
-            configured_providers,
-            default=configured_providers,
-            help=f"Available providers: {', '.join([TTS_PROVIDERS[p].name for p in configured_providers])}"
-        )
-        
-        sample_count = st.slider("Number of samples:", 5, 50, 20)
-        
-        categories = ["news", "literature", "conversation", "technical", "narrative"]
-        selected_categories = st.multiselect(
-            "Categories:",
-            categories,
-            default=categories
-        )
-        
-        length_categories = ["short", "medium", "long", "very_long"]
-        selected_lengths = st.multiselect(
-            "Length categories:",
-            length_categories,
-            default=length_categories
-        )
-        
-        iterations = st.slider("Iterations per test:", 1, 5, 3)
-    
-    with col2:
-        st.subheader("Voice Configuration")
-        
-        voice_config = {}
-        for provider in selected_providers:
-            voices = TTS_PROVIDERS[provider].supported_voices
-            voice_config[provider] = st.multiselect(
-                f"{provider.title()} voices:",
-                voices,
-                default=[voices[0]] if voices else [],
-                key=f"batch_voices_{provider}"
-            )
-    
-    if st.button("Run Benchmark", type="primary"):
-        if selected_providers:
-            prepare_test_dataset(sample_count, selected_categories, selected_lengths)
-            run_batch_benchmark(selected_providers, voice_config, iterations)
-        else:
-            st.error("Please select at least one provider first.")
-
-def prepare_test_dataset(sample_count: int, categories: List[str], lengths: List[str]):
-    """Prepare test dataset for batch benchmarking"""
-    
-    with st.spinner("Preparing test dataset..."):
-        final_samples = []
-        
-        all_samples = st.session_state.dataset_generator.generate_dataset(sample_count * 4)
-            
-        matching_samples = []
-        for sample in all_samples:
-            if (sample.category in categories and 
-                sample.length_category in lengths):
-                matching_samples.append(sample)
-        
-        attempts = 0
-        while len(matching_samples) < sample_count and attempts < 3:
-            additional_samples = st.session_state.dataset_generator.generate_dataset(sample_count * 2)
-            for sample in additional_samples:
-                if (sample.category in categories and 
-                    sample.length_category in lengths and 
-                    len(matching_samples) < sample_count * 2):
-                    matching_samples.append(sample)
-            attempts += 1
-        
-        final_samples = matching_samples[:sample_count]
-        
-        st.session_state.test_samples = final_samples
-    
-    if final_samples:
-        st.success(f"Prepared {len(final_samples)} test samples")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Samples", len(final_samples))
-        
-        with col2:
-            avg_words = sum(s.word_count for s in final_samples) / len(final_samples)
-            st.metric("Avg Words", f"{avg_words:.1f}")
-        
-        with col3:
-            avg_complexity = sum(s.complexity_score for s in final_samples) / len(final_samples)
-            st.metric("Avg Complexity", f"{avg_complexity:.2f}")
-        
-    
-    else:
-        st.warning("No samples match the selected criteria. Try adjusting your filters.")
-
-def run_batch_benchmark(providers: List[str], voice_config: Dict[str, List[str]], iterations: int):
-    """Run batch benchmark"""
-    
-    samples = st.session_state.get("test_samples", [])
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    def progress_callback(completed: int, total: int):
-        progress = completed / total
-        progress_bar.progress(progress)
-        status_text.text(f"Progress: {completed}/{total} tests completed ({progress*100:.1f}%)")
-    
-    with st.spinner("Running benchmark..."):
-        results = asyncio.run(
-            st.session_state.benchmark_engine.run_benchmark_suite(
-                providers=providers,
-                samples=samples,
-                voices_per_provider=voice_config,
-                iterations=iterations,
-                progress_callback=progress_callback
-            )
-        )
-    
-    st.session_state.results.extend(results)
-    
-    st.session_state.benchmark_engine.update_elo_ratings(results)
-    
-    st.success(f"Benchmark completed! {len(results)} tests run.")
-    
-    display_benchmark_summary(results)
-
-def display_benchmark_summary(results: List[BenchmarkResult]):
-    """Display benchmark summary"""
-    
-    st.subheader("📊 Benchmark Summary")
-    
-    summaries = st.session_state.benchmark_engine.calculate_summary_stats(results)
-    
-    current_location = geo_service.get_location_string()
-    
-    ttfb_by_provider = {}
-    for result in results:
-        if result.success and result.ttfb > 0:
-            if result.provider not in ttfb_by_provider:
-                ttfb_by_provider[result.provider] = []
-            ttfb_by_provider[result.provider].append(result.ttfb)
-    
-    summary_data = []
-    for provider, summary in summaries.items():
-        avg_ttfb = sum(ttfb_by_provider.get(provider, [0])) / len(ttfb_by_provider.get(provider, [1])) if provider in ttfb_by_provider else 0
-        summary_data.append({
-            "Provider": provider.title(),
-            "Model": get_model_name(provider),
-            "Location": f"{geo_service.get_country_flag()} {current_location}",
-            "Success Rate": f"{summary.success_rate:.1f}%",
-            "Avg TTFB": f"{avg_ttfb:.1f}ms",
-            "P95 TTFB": f"{summary.p95_latency_ms:.1f}ms",
-            "Avg File Size": f"{summary.avg_file_size_bytes/1024:.1f}KB",
-            "Total Errors": summary.total_errors
-        })
-    
-    df_summary = pd.DataFrame(summary_data)
-    st.dataframe(df_summary, use_container_width=True)
-
-def results_analysis_page():
-    """Results analysis page"""
-    
-    st.header("📈 Results Analysis")
-    st.markdown("Analyze benchmark results with detailed metrics and comparisons")
-    
-    db_results = db.get_recent_results(limit=1000)
-    
-    if db_results.empty:
-        st.info("No benchmark results available. Run a benchmark first.")
-        return
-    
-    results = []
-    for _, row in db_results.iterrows():
-        result = BenchmarkResult(
-            test_id=row.get('test_id', ''),
-            provider=row.get('provider', ''),
-            sample_id=row.get('sample_id', ''),
-            text=row.get('text', ''),
-            voice=row.get('voice', ''),
-            success=bool(row.get('success', False)),
-            latency_ms=float(row.get('latency_ms', 0)),
-            file_size_bytes=int(row.get('file_size_bytes', 0)),
-            error_message=row.get('error_message'),
-            timestamp=row.get('timestamp', ''),
-            metadata=json.loads(row.get('metadata', '{}')) if row.get('metadata') else {},
-            iteration=0,
-            location_country=row.get('location_country', ''),
-            location_city=row.get('location_city', ''),
-            location_region=row.get('location_region', ''),
-            ttfb=float(row.get('ttfb', 0))
-        )
-        results.append(result)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        providers = list(set(r.provider for r in results))
-        selected_providers = st.multiselect("Filter by provider:", providers, default=providers)
-    
-    with col2:
-        categories = list(set(r.metadata.get("category", "unknown") for r in results))
-        selected_categories = st.multiselect("Filter by category:", categories, default=categories)
-    
-    with col3:
-        success_filter = st.selectbox("Success filter:", ["All", "Successful only", "Failed only"])
-    
-    filtered_results = results
-    
-    if selected_providers:
-        filtered_results = [r for r in filtered_results if r.provider in selected_providers]
-    
-    if selected_categories:
-        filtered_results = [r for r in filtered_results if r.metadata.get("category") in selected_categories]
-    
-    if success_filter == "Successful only":
-        filtered_results = [r for r in filtered_results if r.success]
-    elif success_filter == "Failed only":
-        filtered_results = [r for r in filtered_results if not r.success]
-    
-    if not filtered_results:
-        st.warning("No results match the selected filters.")
-        return
-    
-    display_analysis_charts(filtered_results)
-
-def display_analysis_charts(results: List[BenchmarkResult]):
-    """Display analysis charts"""
-    
-    successful_results = [r for r in results if r.success]
-    
-    if not successful_results:
-        st.warning("No successful results to analyze.")
-        return
-    
-    st.subheader("⏰ TTFB Distribution")
-    ttfb_data = []
-    for result in successful_results:
-        if result.success and result.ttfb > 0:
-            ttfb_data.append({
-                "provider": result.provider.title(),
-                "ttfb": result.ttfb,
-                "category": result.metadata.get("category", "unknown")
-            })
-    
-    if ttfb_data:
-        import pandas as pd
-        df_ttfb = pd.DataFrame(ttfb_data)
-        fig_ttfb = px.box(
-            df_ttfb,
-            x="provider",
-            y="ttfb",
-            color="provider",
-            title="TTFB Distribution by Provider",
-            labels={"ttfb": "TTFB (ms)", "provider": "Provider"}
-        )
-        fig_ttfb.update_layout(height=400, showlegend=False)
-        st.plotly_chart(fig_ttfb, use_container_width=True)
-    
-    st.subheader("✅ Success Rate Analysis")
-    fig_success = visualizations.create_success_rate_chart(results)
-    st.plotly_chart(fig_success, use_container_width=True)
-
 def leaderboard_page():
-    """ELO leaderboard page with persistent data"""
+    """ELO leaderboard page with persistent data - styled like Artificial Analysis"""
     
-    st.header("🏆 Leaderboard")
-    st.markdown("ELO-based rankings of TTS providers")
+    st.header("TTS Leaderboard")
+    st.markdown("ELO-based rankings of TTS providers based on blind test comparisons")
     
     leaderboard = st.session_state.benchmark_engine.get_leaderboard()
     
     if not leaderboard:
-        st.info("No leaderboard data available. Run benchmarks to generate rankings.")
+        st.info("No leaderboard data available. Run blind tests or benchmarks to generate rankings.")
+        
+        if st.button("Start Blind Test", type="primary", use_container_width=True):
+            st.session_state.current_page = "Blind Test"
+            st.rerun()
         return
     
-    try:
-        fig_leaderboard = visualizations.create_leaderboard_chart(leaderboard)
-        st.plotly_chart(fig_leaderboard, use_container_width=True)
-    except:
-        pass
-    
-    st.subheader("📊 Current Rankings")
-    
     from database import db
-    try:
-        ttfb_stats = db.get_ttfb_stats_by_provider()
-    except Exception:
-        ttfb_stats = {}
     
-    current_location = geo_service.get_location_string()
-    location_display = f"{geo_service.get_country_flag()} {current_location}"
-    
-    df_leaderboard = pd.DataFrame(leaderboard)
-    df_leaderboard["Provider"] = df_leaderboard["provider"].str.title()
-    
-    df_leaderboard["Model"] = df_leaderboard["provider"].apply(get_model_name)
-    df_leaderboard["Location"] = location_display
-    df_leaderboard["Avg TTFB (ms)"] = df_leaderboard["provider"].apply(
-        lambda p: f"{ttfb_stats.get(p, {}).get('avg_ttfb', 0):.1f}"
-    )
-    df_leaderboard["P95 TTFB (ms)"] = df_leaderboard["provider"].apply(
-        lambda p: f"{ttfb_stats.get(p, {}).get('p95_ttfb', 0):.1f}"
-    )
-    
-    display_df = df_leaderboard[[
-        "rank", "Provider", "Model", "Location", "elo_rating", "Avg TTFB (ms)", "P95 TTFB (ms)",
-        "games_played", "wins", "losses", "win_rate"
-    ]].copy()
-    
-    display_df.columns = [
-        "Rank", "Provider", "Model", "Location", "ELO Rating", "Avg TTFB", "P95 TTFB",
-        "Games", "Wins", "Losses", "Win Rate %"
-    ]
-    
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-    
-    st.subheader("📈 Provider Statistics")
-    
-    from database import db
-    provider_stats = db.get_provider_stats()
-    
-    if provider_stats:
-        stats_data = []
-        location_display = f"{geo_service.get_country_flag()} {geo_service.get_location_string()}"
+    # Prepare data for display
+    display_data = []
+    for item in leaderboard:
+        provider = item["provider"]
+        provider_config = TTS_PROVIDERS.get(provider)
+        provider_name = provider_config.name if provider_config else provider.title()
+        model_name = get_model_name(provider)
         
-        for provider, stats in provider_stats.items():
-            stats_data.append({
-                "Provider": provider.title(),
-                "Model": get_model_name(provider),
-                "Location": location_display,
-                "Total Tests": stats['total_tests'],
-                "Success Rate %": f"{stats['success_rate']:.1f}%",
-                "Avg File Size (KB)": f"{stats['avg_file_size']/1024:.1f}"
-            })
-        
-        stats_df = pd.DataFrame(stats_data)
-        st.dataframe(stats_df, use_container_width=True, hide_index=True)
+        display_data.append({
+            "Rank": f"#{item['rank']}",
+            "Provider": provider_name,
+            "Model": model_name,
+            "ELO": round(item["elo_rating"]),
+            "Samples": item["games_played"],
+            "Wins": item["wins"],
+            "Losses": item["losses"],
+            "Win Rate": f"{item['win_rate']:.1f}%"
+        })
     
-    st.subheader("🗳️ User Voting Statistics")
-    vote_stats = db.get_vote_statistics()
+    # Create DataFrame
+    df = pd.DataFrame(display_data)
     
-    if vote_stats['total_votes'] > 0:
-        st.metric("Total User Votes", vote_stats['total_votes'])
-        
-        if vote_stats['wins']:
-            vote_data = []
-            location_display = f"{geo_service.get_country_flag()} {geo_service.get_location_string()}"
-            
-            for provider, wins in vote_stats['wins'].items():
-                losses = vote_stats['losses'].get(provider, 0)
-                total = wins + losses
-                win_rate = (wins / total * 100) if total > 0 else 0
-                
-                vote_data.append({
-                    "Provider": provider.title(),
-                    "Model": get_model_name(provider),
-                    "Location": location_display,
-                    "User Votes Won": wins,
-                    "User Win Rate %": f"{win_rate:.1f}%"
-                })
-            
-            vote_df = pd.DataFrame(vote_data)
-            st.dataframe(vote_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No user votes yet. Vote in Quick Test to start building preference data!")
-
-def roi_calculator_page():
-    """ROI Calculator page for TTS provider cost analysis"""
+    # Add custom CSS for better styling - remove scroll, let page scroll instead
+    st.markdown("""
+    <style>
+    .stDataFrame {
+        border-radius: 8px;
+        overflow: visible !important;
+    }
+    .stDataFrame > div {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+    .stDataFrame > div > div {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+    .stDataFrame table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .stDataFrame thead th {
+        background-color: #f8f9fa;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        padding: 12px 16px;
+        border-bottom: 2px solid #dee2e6;
+    }
+    .stDataFrame tbody td {
+        padding: 14px 16px;
+        border-bottom: 1px solid #f1f3f5;
+    }
+    .stDataFrame tbody tr:hover {
+        background-color: #f8f9fa;
+    }
+    /* Remove scrollbar from dataframe container */
+    div[data-testid="stDataFrame"] > div {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+    div[data-testid="stDataFrame"] > div > div {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    st.header("💰 ROI Calculator")
-    st.markdown("Calculate the return on investment for different TTS providers based on your usage patterns.")
-    
-    roi_calculator_html = '''
-    <div id="tts-tool"></div>
-    <script src="https://cdn.jsdelivr.net/gh/ShreyashCJ/roi_calculator/3.js"></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        const roiNamespace = window["roi-calculator"];
-        if (roiNamespace && typeof roiNamespace.default === "function") {
-          roiNamespace.default(document.getElementById("tts-tool"), {});
-        } else if (typeof roiNamespace === "function") {
-          roiNamespace(document.getElementById("tts-tool"), {});
-        } else {
-          console.error("roi-calculator function not loaded.", roiNamespace);
+    # Display table without height limit - use 'content' to show all rows
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height="content",
+        column_config={
+            "Rank": st.column_config.TextColumn("Rank", width="small"),
+            "Provider": st.column_config.TextColumn("Provider", width="medium"),
+            "Model": st.column_config.TextColumn("Model", width="medium"),
+            "ELO": st.column_config.NumberColumn("ELO", format="%d", width="small"),
+            "Samples": st.column_config.NumberColumn("Samples", format="%d", width="small"),
+            "Wins": st.column_config.NumberColumn("Wins", format="%d", width="small"),
+            "Losses": st.column_config.NumberColumn("Losses", format="%d", width="small"),
+            "Win Rate": st.column_config.TextColumn("Win Rate", width="small")
         }
-      });
-    </script>
-    '''
-    
-    components.html(roi_calculator_html, height=1400, scrolling=False)
-    
-    st.markdown("---")
-    st.markdown("### 💡 Tips for Using the ROI Calculator")
-    
-    st.markdown('<div style="margin-bottom: 2rem;"></div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        **Technology Selection**
-        - Choose between Highest Quality, Balanced, or Cost Effective tabs
-        - Compare different LLM, TTS, and STT providers
-        - See real-time cost updates as you change selections
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Cost Breakdown**
-        - Switch between per minute, per 1k characters, or custom pricing
-        - View detailed cost breakdowns for each component
-        - Optimize your configuration for best ROI
-        """)
-    
-    with col3:
-        st.markdown("""
-        **Parameters**
-        - Adjust LLM input size and call duration
-        - Set AI agent talk time percentage
-        - Fine-tune your usage patterns for accurate calculations
-        """)
-    
-    st.markdown('<div style="margin-bottom: 3rem;"></div>', unsafe_allow_html=True)
-
+    )
 
 if __name__ == "__main__":
     main()

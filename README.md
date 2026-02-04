@@ -127,21 +127,9 @@ docker run -p 8501:8501 --env-file .env tts-benchmark
   - Provider statistics
   - User voting data
 
-## Export Formats
-
-- **JSON**: Raw results with metadata
-- **CSV**: Flattened results for analysis
-- **Excel**: Multi-sheet workbook with summaries
-- **Comprehensive Report**: Full analysis with comparisons
-- **ZIP Package**: All formats bundled together
-
 ## Performance
 
 - Async processing for concurrent requests
 - Rate limiting to prevent API abuse
 - Database caching for historical data
 - Optimized for production workloads
-
-## License
-
-MIT License - see LICENSE file for details

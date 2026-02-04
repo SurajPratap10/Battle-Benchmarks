@@ -228,25 +228,42 @@ class BenchmarkDatabase:
         conn.close()
     
     def update_elo_ratings(self, winner: str, loser: str, k_factor: int = 32):
-        """Update ELO ratings after a comparison"""
+        """Update ELO ratings based purely on votes - simple vote-based system
+        
+        IMPORTANT: This method should ONLY be called from blind test votes (user preferences).
+        It should NOT be called from quick test results or benchmark comparisons based on
+        technical metrics like latency or TTFB. ELO is based purely on user quality preferences.
+        
+        Simple system: Each vote win = +points, each vote loss = -points
+        More votes/wins = higher ELO. Simple and straightforward.
+        """
+        # Ensure both providers are initialized
+        self.init_elo_rating(winner)
+        self.init_elo_rating(loser)
+        
         winner_rating = self.get_elo_rating(winner)
         loser_rating = self.get_elo_rating(loser)
         
-        expected_winner = 1 / (1 + 10**((loser_rating - winner_rating) / 400))
-        expected_loser = 1 / (1 + 10**((winner_rating - loser_rating) / 400))
+        # Simple vote-based ELO: winner gains points, loser loses points
+        # No complex expected score calculations - just based on votes
+        new_winner_rating = winner_rating + k_factor  # Winner gains fixed points
+        new_loser_rating = loser_rating - k_factor     # Loser loses fixed points
         
-        new_winner_rating = winner_rating + k_factor * (1 - expected_winner)
-        new_loser_rating = loser_rating + k_factor * (0 - expected_loser)
+        # Ensure ratings don't go below 0
+        if new_loser_rating < 0:
+            new_loser_rating = 0
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Update winner: increase rating, increment wins
         cursor.execute('''
             UPDATE elo_ratings 
             SET rating = ?, games_played = games_played + 1, wins = wins + 1, last_updated = ?
             WHERE provider = ?
         ''', (new_winner_rating, datetime.now(), winner))
         
+        # Update loser: decrease rating, increment losses
         cursor.execute('''
             UPDATE elo_ratings 
             SET rating = ?, games_played = games_played + 1, losses = losses + 1, last_updated = ?
@@ -330,6 +347,20 @@ class BenchmarkDatabase:
         
         conn.close()
         return df
+    
+    def clear_all_data(self):
+        """Clear all data from database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM benchmark_results')
+        cursor.execute('DELETE FROM elo_ratings')
+        cursor.execute('DELETE FROM provider_stats')
+        cursor.execute('DELETE FROM test_sessions')
+        cursor.execute('DELETE FROM user_votes')
+        
+        conn.commit()
+        conn.close()
     
     def clear_old_data(self, days_old: int = 30):
         """Clear data older than specified days"""
