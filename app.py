@@ -187,7 +187,7 @@ def main():
         
         st.divider()
         
-        st.subheader("Configuration")
+        st.subheader("Models Configured")
         
         config_status = check_configuration()
         
