@@ -1108,6 +1108,14 @@ class SarvamTTSProvider(TTSProvider):
     
     def __init__(self):
         super().__init__("sarvam")
+        # Map voice IDs to Sarvam speaker names
+        # Sarvam has: Male voices (abhilash, karun, hitesh) and Female voices (anushka, manisha, vidya, arya)
+        self.voice_to_speaker_map = {
+            "en-IN-male": "abhilash",      # Male English voice
+            "en-IN-female": "anushka",     # Female English voice
+            "hi-IN-male": "karun",         # Male Hindi voice
+            "hi-IN-female": "manisha"      # Female Hindi voice
+        }
     
     async def generate_speech(self, request: TTSRequest) -> TTSResult:
         """Generate speech using Sarvam AI API"""
@@ -1133,11 +1141,18 @@ class SarvamTTSProvider(TTSProvider):
         # Determine language based on voice selection
         language = "en-IN" if "en-IN" in request.voice else "hi-IN"
         
-        # Sarvam AI API payload structure
+        # Get speaker name from voice mapping - CRITICAL for gender selection
+        speaker = self.voice_to_speaker_map.get(request.voice, "anushka")  # Default to female if not found
+        
+        # Log for debugging gender selection
+        print(f"[SARVAM DEBUG] Voice: {request.voice} -> Speaker: {speaker}, Language: {language}")
+        
+        # Sarvam AI API payload structure - MUST include speaker parameter for correct voice selection
         payload = {
             "text": request.text,
             "model": "bulbul:v2",
-            "language": language
+            "language": language,
+            "speaker": speaker  # This parameter is REQUIRED to select the correct voice/gender
         }
         
         try:
