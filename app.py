@@ -1013,21 +1013,65 @@ def generate_next_comparison():
         print(f"[GENDER DEBUG] Selected {gender_filter} voice for competitor: {competitor_voice} (from {len(competitor_voices)} options)")
     
     # Special handling for Cartesia providers - validate voice exists in voice_id_map
+    # CRITICAL: Must ensure gender is maintained when validating Cartesia voices
     if competitor_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
         try:
             provider_obj = TTSProviderFactory.create_provider(competitor_id)
             if hasattr(provider_obj, 'voice_id_map'):
-                if competitor_voice not in provider_obj.voice_id_map:
-                    # Voice not in map, try to find a valid one
-                    valid_voices = [v for v in competitor_voices if v in provider_obj.voice_id_map]
+                # First verify the selected voice is in map AND matches gender
+                voice_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+                voice_in_map = competitor_voice in provider_obj.voice_id_map
+                gender_matches = voice_info and voice_info.gender == gender_filter
+                
+                if not voice_in_map or not gender_matches:
+                    # Find voices that are: 1) in voice_id_map, 2) match gender, 3) in supported_voices
+                    valid_voices = [
+                        v for v in competitor_voices 
+                        if v in provider_obj.voice_id_map and
+                        TTS_PROVIDERS[competitor_id].voice_info.get(v) and
+                        TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
+                    ]
+                    
                     if valid_voices:
                         competitor_voice = random.choice(valid_voices)
+                        print(f"[CARTESIA DEBUG] Selected valid voice {competitor_voice} (gender: {gender_filter})")
                     else:
-                        st.error(f"Voice '{competitor_voice}' not found in Cartesia voice mapping. Available voices: {list(provider_obj.voice_id_map.keys())}")
-                        st.session_state.blind_test_current_pair = None
-                        return
+                        # Last resort: find any voice matching gender from voice_id_map
+                        all_matching = [
+                            v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items()
+                            if info.gender == gender_filter and 
+                            v in provider_obj.voice_id_map and 
+                            v in TTS_PROVIDERS[competitor_id].supported_voices
+                        ]
+                        if all_matching:
+                            competitor_voice = random.choice(all_matching)
+                            print(f"[CARTESIA DEBUG] Found alternative voice {competitor_voice} (gender: {gender_filter})")
+                        else:
+                            st.error(f"No {gender_filter} voice found in Cartesia voice mapping. Available: {list(provider_obj.voice_id_map.keys())}")
+                            st.session_state.blind_test_current_pair = None
+                            return
+                else:
+                    print(f"[CARTESIA DEBUG] Voice {competitor_voice} is valid (in map, gender: {gender_filter})")
         except Exception as e:
             print(f"Warning: Could not validate Cartesia voice: {e}")
+    
+    # Special handling for Sarvam - ensure voice matches gender
+    if competitor_id == "sarvam":
+        voice_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+        if not voice_info or voice_info.gender != gender_filter:
+            print(f"[SARVAM DEBUG] Gender check: voice={competitor_voice}, expected={gender_filter}, got={voice_info.gender if voice_info else 'None'}")
+            # Find correct gender voice
+            correct_voices = [
+                v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items()
+                if info.gender == gender_filter and v in TTS_PROVIDERS[competitor_id].supported_voices
+            ]
+            if correct_voices:
+                competitor_voice = random.choice(correct_voices)
+                print(f"[SARVAM DEBUG] Fixed gender mismatch, using {competitor_voice}")
+            else:
+                st.error(f"No {gender_filter} voice available for Sarvam AI")
+                st.session_state.blind_test_current_pair = None
+                return
     
     # FINAL STRICT GENDER VERIFICATION - Ensure competitor voice gender matches Murf voice gender
     if competitor_id in TTS_PROVIDERS:
@@ -1077,11 +1121,30 @@ def generate_next_comparison():
     # IMPORTANT: Murf voice stays FIXED - use the one from session state, don't change it
     # The murf_voice is already set from the setup page and should never change during comparisons
     
-    # FINAL GENDER CHECK LOG
+    # FINAL GENDER CHECK LOG - CRITICAL VERIFICATION BEFORE GENERATION
     murf_final_info = TTS_PROVIDERS[murf_provider_id].voice_info.get(murf_voice)
     comp_final_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice) if competitor_id in TTS_PROVIDERS else None
-    print(f"[GENDER FINAL] Murf: {murf_voice} ({murf_final_info.gender if murf_final_info else '?'}) vs Competitor: {competitor_voice} ({comp_final_info.gender if comp_final_info else '?'})")
     
+    # ABSOLUTE FINAL CHECK - if genders don't match, force fix it
+    if murf_final_info and comp_final_info and murf_final_info.gender != comp_final_info.gender:
+        print(f"[GENDER FINAL] CRITICAL ERROR: Gender mismatch detected! Murf: {murf_final_info.gender}, Competitor: {comp_final_info.gender}")
+        # Force find correct gender voice
+        correct_gender_voices = [
+            v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items()
+            if info.gender == murf_final_info.gender and v in TTS_PROVIDERS[competitor_id].supported_voices
+        ]
+        if correct_gender_voices:
+            competitor_voice = random.choice(correct_gender_voices)
+            comp_final_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+            print(f"[GENDER FINAL] FORCED FIX: Changed competitor voice to {competitor_voice} (gender: {comp_final_info.gender if comp_final_info else '?'})")
+        else:
+            st.error(f"CRITICAL: Cannot find {murf_final_info.gender} voice for {TTS_PROVIDERS[competitor_id].name}. Cannot proceed.")
+            st.session_state.blind_test_current_pair = None
+            return
+    
+    print(f"[GENDER FINAL] ✓ Verified: Murf: {murf_voice} ({murf_final_info.gender if murf_final_info else '?'}) vs Competitor: {competitor_voice} ({comp_final_info.gender if comp_final_info else '?'})")
+    
+    # Additional safety check - this should never trigger if above logic works correctly
     if murf_final_info and comp_final_info and murf_final_info.gender != comp_final_info.gender:
         print(f"[GENDER FINAL] ❌ CRITICAL ERROR: Gender mismatch detected! Aborting.")
         st.error(f"Gender mismatch: Murf ({murf_final_info.gender}) vs Competitor ({comp_final_info.gender})")
