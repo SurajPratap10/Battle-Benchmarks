@@ -492,6 +492,8 @@ def blind_test_page():
         st.session_state.blind_test_selected_competitors = []
     if "blind_test_murf_voice" not in st.session_state:
         st.session_state.blind_test_murf_voice = None
+    if "blind_test_murf_voices" not in st.session_state:
+        st.session_state.blind_test_murf_voices = []  # List of selected MURF voices (up to 4)
     if "blind_test_gender_filter" not in st.session_state:
         st.session_state.blind_test_gender_filter = "female"
     if "blind_test_setup_complete" not in st.session_state:
@@ -638,36 +640,57 @@ def display_blind_test_setup(configured_providers: List[str]):
                 if filtered_voices:
                     st.session_state.blind_test_murf_voice = filtered_voices[0][0]
             
-            # Voice dropdown
+            # Voice multiselect (up to 4 voices)
             voice_options = [f"{info.name} ({info.accent})" for v, info in filtered_voices]
             voice_ids = [v for v, info in filtered_voices]
             
             if voice_options:
-                # Find current selection index
-                current_voice_id = st.session_state.blind_test_murf_voice
-                if current_voice_id in voice_ids:
-                    current_idx = voice_ids.index(current_voice_id)
-                else:
-                    # Fallback to first voice if current not found
-                    current_idx = 0
-                    st.session_state.blind_test_murf_voice = voice_ids[0]
+                # Initialize selected voices if not set
+                if "blind_test_murf_voices" not in st.session_state or not st.session_state.blind_test_murf_voices:
+                    # Default to first voice if none selected
+                    st.session_state.blind_test_murf_voices = [voice_ids[0]] if voice_ids else []
                 
-                # Use stable key that persists across reruns
-                selected_voice_display = st.selectbox(
-                    "Voice:",
+                # Find currently selected voice indices for multiselect
+                current_selected_indices = []
+                for voice_id in st.session_state.blind_test_murf_voices:
+                    if voice_id in voice_ids:
+                        current_selected_indices.append(voice_ids.index(voice_id))
+                
+                # Use multiselect to allow selecting up to 4 voices
+                selected_voice_displays = st.multiselect(
+                    "Select MURF voices (up to 4, will shuffle during comparisons):",
                     voice_options,
-                    index=current_idx,
-                    key="voice_select"
+                    default=[voice_options[i] for i in current_selected_indices if i < len(voice_options)],
+                    max_selections=4,
+                    key="murf_voices_multiselect"
                 )
                 
-                # Update session state with selected voice
-                selected_voice_idx = voice_options.index(selected_voice_display)
-                st.session_state.blind_test_murf_voice = voice_ids[selected_voice_idx]
+                # Update session state with selected voice IDs
+                selected_voice_ids = []
+                for display in selected_voice_displays:
+                    idx = voice_options.index(display)
+                    selected_voice_ids.append(voice_ids[idx])
+                
+                st.session_state.blind_test_murf_voices = selected_voice_ids
+                
+                # Keep backward compatibility: set single voice to first selected for legacy code
+                if selected_voice_ids:
+                    st.session_state.blind_test_murf_voice = selected_voice_ids[0]
+                else:
+                    # If no voices selected, default to first voice
+                    if voice_ids:
+                        st.session_state.blind_test_murf_voices = [voice_ids[0]]
+                        st.session_state.blind_test_murf_voice = voice_ids[0]
             
-            # Show selected voice info
-            selected_info = murf_voice_info.get(st.session_state.blind_test_murf_voice)
-            if selected_info:
-                st.caption(f"Selected: **{selected_info.name}** • Will compare with {selected_gender} voices")
+            # Show selected voices info
+            if st.session_state.blind_test_murf_voices:
+                selected_names = []
+                for voice_id in st.session_state.blind_test_murf_voices:
+                    voice_info = murf_voice_info.get(voice_id)
+                    if voice_info:
+                        selected_names.append(voice_info.name)
+                if selected_names:
+                    st.caption(f"Selected: **{', '.join(selected_names)}** • Will shuffle during comparisons • Will compare with {selected_gender} voices")
         else:
             st.warning("No Murf provider configured")
     
@@ -710,7 +733,8 @@ Hello, how can I assist you today with your account inquiry?""",
     
     can_start = (
         len(st.session_state.get("blind_test_selected_competitors", [])) >= 1 and 
-        st.session_state.blind_test_murf_voice and 
+        (st.session_state.blind_test_murf_voice or 
+         (st.session_state.blind_test_murf_voices and len(st.session_state.blind_test_murf_voices) > 0)) and 
         len(st.session_state.blind_test_sentences) >= 1
     )
     
@@ -948,17 +972,46 @@ def generate_next_comparison():
         st.error("No Murf provider configured. Please set MURF_API_KEY.")
         return
     
-    # Get Murf voice - KEEP IT FIXED (don't change it)
-    murf_voice = st.session_state.blind_test_murf_voice
+    # Get Murf voice - SHUFFLE through selected voices
     gender_filter = st.session_state.blind_test_gender_filter
+    comparison_index = st.session_state.blind_test_comparison_count
     
-    # Ensure Murf voice is still valid, if not reset to first voice of selected gender
-    if murf_voice not in TTS_PROVIDERS[murf_provider_id].supported_voices:
-        murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
-        filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
-        if filtered_voices:
-            murf_voice = filtered_voices[0][0]
-            st.session_state.blind_test_murf_voice = murf_voice
+    # Get selected MURF voices (up to 4)
+    selected_murf_voices = st.session_state.blind_test_murf_voices if st.session_state.blind_test_murf_voices else []
+    
+    # If no voices selected, fall back to single voice or get first voice of selected gender
+    if not selected_murf_voices:
+        murf_voice = st.session_state.blind_test_murf_voice
+        if not murf_voice or murf_voice not in TTS_PROVIDERS[murf_provider_id].supported_voices:
+            murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+            filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
+            if filtered_voices:
+                murf_voice = filtered_voices[0][0]
+                st.session_state.blind_test_murf_voice = murf_voice
+                selected_murf_voices = [murf_voice]
+        voice_index = 0  # Only one voice selected
+    else:
+        # Cycle through selected voices based on comparison count
+        # Use modulo to cycle through the list
+        voice_index = comparison_index % len(selected_murf_voices)
+        murf_voice = selected_murf_voices[voice_index]
+        
+        # Ensure selected voice is still valid
+        if murf_voice not in TTS_PROVIDERS[murf_provider_id].supported_voices:
+            # Voice is invalid, filter and use first valid one
+            murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+            filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
+            valid_voice_ids = [v for v in selected_murf_voices if v in TTS_PROVIDERS[murf_provider_id].supported_voices]
+            if valid_voice_ids:
+                voice_index = comparison_index % len(valid_voice_ids)
+                murf_voice = valid_voice_ids[voice_index]
+            elif filtered_voices:
+                murf_voice = filtered_voices[0][0]
+                selected_murf_voices = [murf_voice]
+                st.session_state.blind_test_murf_voices = selected_murf_voices
+                voice_index = 0
+    
+    print(f"[MURF VOICE DEBUG] Comparison #{comparison_index + 1}: Using MURF voice: {murf_voice} (voice {voice_index + 1} of {len(selected_murf_voices)} selected)")
     
     # Get the selected competitor (single selection now)
     competitors = st.session_state.blind_test_selected_competitors
