@@ -1833,7 +1833,7 @@ def handle_blind_test_vote(winner_result: BenchmarkResult, loser_result: Benchma
 def leaderboard_page():
     """ELO leaderboard page with persistent data - styled like Artificial Analysis"""
     
-    st.header("TTS Leaderboard")
+    st.header("Leaderboard")
     st.markdown("ELO-based rankings of TTS providers based on blind test comparisons")
     
     leaderboard = st.session_state.benchmark_engine.get_leaderboard()
