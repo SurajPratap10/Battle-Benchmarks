@@ -3239,7 +3239,7 @@ def leaderboard_page():
     """ELO leaderboard page - shows persistent Ranked Blind Test results from database"""
     
     st.header("Leaderboard")
-    st.markdown("ELO-based rankings from Ranked Blind Test only")
+    st.markdown("ELO-based rankings from Ranked Blind Test only (1000 is default rating to start with)")
     
     # Get all configured providers - show ALL models with default ELO 1000
     config_status = check_configuration()
