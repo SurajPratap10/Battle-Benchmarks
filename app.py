@@ -3241,17 +3241,16 @@ def leaderboard_page():
     st.header("Leaderboard")
     st.markdown("ELO-based rankings from Ranked Blind Test only")
     
+    # Get all configured providers - show ALL models with default ELO 1000
+    config_status = check_configuration()
+    configured_providers = [
+        provider_id for provider_id, status in config_status["providers"].items() 
+        if status["configured"]
+    ]
+    
     # Get Ranked Blind Test votes from database (persistent storage)
     # This reads fresh data from database every time the page loads
     votes = db.get_ranked_blind_test_votes()
-    
-    if not votes:
-        st.info("No Ranked Blind Test data available. Run Ranked Blind Test to generate rankings.")
-        
-        if st.button("Start Ranked Blind Test", type="primary", use_container_width=True):
-            st.session_state.current_page = "Ranked Blind Test"
-            st.rerun()
-        return
     
     # Calculate stats from all Ranked Blind Test votes
     provider_wins = {}
@@ -3261,28 +3260,33 @@ def leaderboard_page():
         provider_wins[winner] = provider_wins.get(winner, 0) + 1
         provider_losses[loser] = provider_losses.get(loser, 0) + 1
     
-    # Calculate ELO from all Ranked Blind Test votes (starting from 1000 for all)
+    # Initialize ELO for ALL configured providers at 1000 (default)
     test_session_elo = {}
-    all_providers = set(provider_wins.keys()) | set(provider_losses.keys())
+    all_providers = set(configured_providers)  # Start with all configured providers
+    # Also include any providers that have votes (in case they're not configured anymore)
+    all_providers = all_providers | set(provider_wins.keys()) | set(provider_losses.keys())
+    
+    # Initialize all providers at default ELO of 1000
     for provider in all_providers:
-        test_session_elo[provider] = 1000.0  # Start all at 1000
+        test_session_elo[provider] = 1000.0  # Default ELO for all
     
-    # Replay all votes to calculate cumulative ELO
-    for winner, loser, timestamp, metadata in votes:
-        winner_rating = test_session_elo.get(winner, 1000.0)
-        loser_rating = test_session_elo.get(loser, 1000.0)
-        
-        # Calculate expected scores using ELO formula
-        import math
-        expected_winner = 1 / (1 + math.pow(10, (loser_rating - winner_rating) / 400))
-        expected_loser = 1 / (1 + math.pow(10, (winner_rating - loser_rating) / 400))
-        
-        # Update ELO
-        k_factor = 32
-        test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
-        test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
+    # Replay all votes to calculate cumulative ELO (only if votes exist)
+    if votes:
+        for winner, loser, timestamp, metadata in votes:
+            winner_rating = test_session_elo.get(winner, 1000.0)
+            loser_rating = test_session_elo.get(loser, 1000.0)
+            
+            # Calculate expected scores using ELO formula
+            import math
+            expected_winner = 1 / (1 + math.pow(10, (loser_rating - winner_rating) / 400))
+            expected_loser = 1 / (1 + math.pow(10, (winner_rating - loser_rating) / 400))
+            
+            # Update ELO
+            k_factor = 32
+            test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
+            test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
     
-    # Prepare data for display - from all Ranked Blind Test sessions (persistent)
+    # Prepare data for display - show ALL configured providers with default ELO 1000
     display_data = []
     for provider in all_providers:
         wins = provider_wins.get(provider, 0)
@@ -3298,11 +3302,11 @@ def leaderboard_page():
             "Rank": 0,  # Will be assigned after sorting
             "Provider": provider_name,
             "Model": model_name,
-            "ELO": round(test_session_elo[provider]),
+            "ELO": round(test_session_elo.get(provider, 1000)),  # Default to 1000 if not found
             "Samples": total,
             "Wins": wins,
             "Losses": losses,
-            "Win Rate": f"{win_rate:.1f}%"
+            "Win Rate": f"{win_rate:.1f}%" if total > 0 else "0.0%"
         })
     
     # Sort by ELO and assign ranks
