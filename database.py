@@ -409,18 +409,28 @@ class BenchmarkDatabase:
         
         return filename
     
-    def save_user_vote(self, winner: str, loser: str, text_sample: str, session_id: str = "default"):
+    def save_user_vote(self, winner: str, loser: str, text_sample: str, session_id: str = "default", vote_type: str = "user_preference", metadata: dict = None):
         """Save a user preference vote"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        # Determine vote source from session_id
+        vote_source = 'quick_test'
+        if 'blind_battle_2' in session_id:
+            vote_source = 'ranked_blind_test'
+        elif 'blind_battle' in session_id or 'blind_test' in session_id:
+            vote_source = 'blind_test'
+        
+        vote_metadata = metadata or {}
+        vote_metadata['vote_source'] = vote_source
         
         cursor.execute('''
             INSERT INTO user_votes 
             (winner, loser, vote_type, text_sample, session_id, timestamp, metadata)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
-            winner, loser, 'user_preference', text_sample, session_id,
-            datetime.now(), json.dumps({'vote_source': 'quick_test'})
+            winner, loser, vote_type, text_sample, session_id,
+            datetime.now(), json.dumps(vote_metadata)
         ))
         
         conn.commit()
@@ -457,6 +467,23 @@ class BenchmarkDatabase:
             'recent_votes': recent_votes,
             'total_votes': sum(wins.values())
         }
+    
+    def get_ranked_blind_test_votes(self) -> List[tuple]:
+        """Get all votes from Ranked Blind Test (blind_battle_2 sessions)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get votes where session_id contains 'blind_battle_2' or metadata contains 'ranked_blind_test'
+        cursor.execute('''
+            SELECT winner, loser, timestamp, metadata FROM user_votes 
+            WHERE session_id LIKE '%blind_battle_2%' 
+               OR metadata LIKE '%ranked_blind_test%'
+            ORDER BY timestamp ASC
+        ''')
+        votes = cursor.fetchall()
+        
+        conn.close()
+        return votes
     
     def get_latency_stats_by_provider(self) -> Dict[str, Dict]:
         """Get latency statistics including P95 for each provider"""

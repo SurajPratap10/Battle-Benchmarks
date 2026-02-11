@@ -168,11 +168,11 @@ def main():
     st.markdown("Compare Text-to-Speech providers with comprehensive metrics and analysis")
     
     with st.sidebar:
-        default_page = "Blind Test"
+        default_page = "Ranked Blind Test"
         
         st.subheader("Navigator")
         
-        pages = ["Blind Test", "Leaderboard", "Quick Test"]
+        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Quick Test"]
         
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
@@ -183,7 +183,7 @@ def main():
             page = st.session_state.navigate_to
             st.session_state.navigate_to = None
         else:
-            page = st.session_state.get("current_page", "Blind Test")
+            page = st.session_state.get("current_page", "Ranked Blind Test")
         
         st.divider()
         
@@ -220,8 +220,10 @@ def main():
     
     if page == "Quick Test":
         quick_test_page()
-    elif page == "Blind Test":
+    elif page == "Unranked Blind Test":
         blind_test_page()
+    elif page == "Ranked Blind Test":
+        blind_test_2_page()
     elif page == "Leaderboard":
         leaderboard_page()
 
@@ -459,7 +461,7 @@ def display_quick_test_results(results: List[BenchmarkResult]):
 def blind_test_page():
     """Blind test page for unbiased audio quality comparison - Voice Battles style"""
     
-    st.header("Voice Battles - Blind Test")
+    st.header("Blind Test")
     st.markdown("Compare TTS providers head-to-head. Listen to at least 3 seconds of each sample before voting.")
     
     config_status = check_configuration()
@@ -524,6 +526,234 @@ def blind_test_page():
     else:
         # No test in progress - show setup
         display_blind_test_setup(configured_providers)
+
+def blind_test_2_page():
+    """Blind test page for unbiased audio quality comparison - Voice Battles style"""
+    
+    st.header("Ranked Blind Test")
+    st.markdown("Compare TTS providers head-to-head. Listen to at least 3 seconds of each sample before voting.")
+    
+    config_status = check_configuration()
+    
+    if not st.session_state.config_valid:
+        st.warning("Please configure at least one API key in the sidebar first.")
+        return
+    
+    configured_providers = [
+        provider_id for provider_id, status in config_status["providers"].items() 
+        if status["configured"]
+    ]
+    
+    if len(configured_providers) < 2:
+        st.warning("⚠️ Blind test requires at least 2 configured providers. Please configure more API keys.")
+        return
+    
+    # Initialize session state for progressive blind test (using _2 suffix)
+    if "blind_test_2_sentences" not in st.session_state:
+        st.session_state.blind_test_2_sentences = []
+    if "blind_test_2_current_pair" not in st.session_state:
+        st.session_state.blind_test_2_current_pair = None
+    if "blind_test_2_comparison_count" not in st.session_state:
+        st.session_state.blind_test_2_comparison_count = 0
+    if "blind_test_2_max_comparisons" not in st.session_state:
+        st.session_state.blind_test_2_max_comparisons = 25
+    if "blind_test_2_results_history" not in st.session_state:
+        st.session_state.blind_test_2_results_history = []
+    if "blind_test_2_selected_competitors" not in st.session_state:
+        st.session_state.blind_test_2_selected_competitors = []
+    if "blind_test_2_murf_voice" not in st.session_state:
+        st.session_state.blind_test_2_murf_voice = None
+    if "blind_test_2_murf_voices" not in st.session_state:
+        st.session_state.blind_test_2_murf_voices = []  # List of selected MURF voices (up to 4)
+    if "blind_test_2_gender_filter" not in st.session_state:
+        st.session_state.blind_test_2_gender_filter = "female"
+    if "blind_test_2_setup_complete" not in st.session_state:
+        st.session_state.blind_test_2_setup_complete = False
+    if "blind_test_2_audio_played" not in st.session_state:
+        st.session_state.blind_test_2_audio_played = {"A": 0, "B": 0}
+    if "show_final_results_2" not in st.session_state:
+        st.session_state.show_final_results_2 = False
+    
+    # If final results should be shown, display them directly
+    if st.session_state.get("show_final_results_2", False):
+        display_final_results_2()
+        return
+    
+    # Show setup or comparison view
+    # Preserve test state: if test is in progress, show comparison view (even if error occurred)
+    # This ensures that if user navigates away and comes back, they continue where they left off
+    test_in_progress = (
+        st.session_state.blind_test_2_setup_complete or 
+        st.session_state.blind_test_2_comparison_count > 0 or 
+        st.session_state.blind_test_2_current_pair is not None or
+        len(st.session_state.blind_test_2_results_history) > 0
+    )
+    
+    if test_in_progress:
+        # Test is in progress - show comparison view (will handle errors gracefully)
+        display_blind_test_2_comparison()
+    else:
+        # No test in progress - show setup
+        display_blind_test_2_setup(configured_providers)
+
+def display_blind_test_2_setup(configured_providers: List[str]):
+    """Display the blind test 2 setup page"""
+    from config import get_voices_by_gender, get_voice_gender
+    import random
+    
+    # Get all providers (including MURF) for selection
+    all_providers = configured_providers
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("**1. Select Competitors**")
+        
+        # Create dropdown options for all competitors (including MURF)
+        competitor_options = []
+        competitor_ids = []
+        for provider_id in all_providers:
+            provider_name = TTS_PROVIDERS[provider_id].name
+            model_name = TTS_PROVIDERS[provider_id].model_name
+            competitor_options.append(f"{provider_name} ({model_name})")
+            competitor_ids.append(provider_id)
+        
+        if competitor_options:
+            # Initialize selected competitors if not set
+            if "blind_test_2_selected_competitors" not in st.session_state:
+                st.session_state.blind_test_2_selected_competitors = []
+            
+            # Find currently selected competitor indices for multiselect
+            current_selected_indices = []
+            for comp_id in st.session_state.blind_test_2_selected_competitors:
+                if comp_id in competitor_ids:
+                    current_selected_indices.append(competitor_ids.index(comp_id))
+            
+            # Use multiselect to allow selecting up to 5 competitors
+            selected_competitor_displays = st.multiselect(
+                "Select competitors (up to 5, we will randomly choose 2 for each comparison):",
+                competitor_options,
+                default=[competitor_options[i] for i in current_selected_indices if i < len(competitor_options)],
+                max_selections=5,
+                key="competitors_multiselect_2"
+            )
+            
+            # Update session state with selected competitor IDs
+            selected_competitor_ids = []
+            for display in selected_competitor_displays:
+                idx = competitor_options.index(display)
+                selected_competitor_ids.append(competitor_ids[idx])
+            
+            st.session_state.blind_test_2_selected_competitors = selected_competitor_ids
+            
+            # Show info about selected competitors
+            if selected_competitor_ids:
+                st.caption(f"✅ {len(selected_competitor_ids)} competitor(s) selected. System will randomly pick 2 for each comparison.")
+            else:
+                st.caption("Select at least 2 competitors to start")
+        else:
+            st.warning("No competitors configured")
+    
+    with col2:
+        st.markdown("**2. Test Parameters**")
+        max_comparisons = st.slider(
+            "Number of comparisons:",
+            min_value=5,
+            max_value=50,
+            value=25,
+            step=5,
+            help="How many head-to-head comparisons to run",
+            key="max_comparisons_2"
+        )
+        st.session_state.blind_test_2_max_comparisons = max_comparisons
+        
+        # Gender selection - once for all comparisons
+        st.markdown("**3. Select Voice Gender**")
+        if "blind_test_2_gender_filter" not in st.session_state:
+            st.session_state.blind_test_2_gender_filter = "female"
+        
+        selected_gender = st.radio(
+            "Choose gender for all comparisons:",
+            ["Male", "Female"],
+            index=0 if st.session_state.blind_test_2_gender_filter == "female" else 1,
+            horizontal=True,
+            key="gender_radio_setup_2"
+        )
+        st.session_state.blind_test_2_gender_filter = selected_gender.lower()
+        st.caption(f"All comparisons will use {selected_gender.lower()} voices")
+    
+    st.divider()
+    
+    # Sentence upload section - full width
+    st.markdown("**3. Upload Test Sentences** (System will pick randomly)")
+    
+    sentences_text = st.text_area(
+        "Enter sentences (one per line):",
+        value="""The quick brown fox jumps over the lazy dog.
+The wine glass fills again and laughter breaks through the pressure that had been building quietly for hours.
+Just to confirm, the co-applicant's name is spelled M-A-R-I-S-A, correct?
+Scientists have made a groundbreaking discovery that could revolutionize renewable energy.
+Hello, how can I assist you today with your account inquiry?""",
+        height=200,
+        help="Enter multiple sentences, one per line. The system will randomly select sentences for each test.",
+        key="sentences_text_2"
+    )
+    
+    sentences = [s.strip() for s in sentences_text.strip().split('\n') if s.strip()]
+    
+    # Check if sentences have changed - if so, clear current pair to force regeneration
+    if "blind_test_2_sentences_hash" not in st.session_state:
+        st.session_state.blind_test_2_sentences_hash = None
+    
+    import hashlib
+    sentences_hash = hashlib.md5(str(sorted(sentences)).encode()).hexdigest()
+    
+    # If sentences changed and there's a current pair, clear it
+    if (st.session_state.blind_test_2_sentences_hash is not None and 
+        st.session_state.blind_test_2_sentences_hash != sentences_hash and
+        st.session_state.blind_test_2_current_pair is not None):
+        st.session_state.blind_test_2_current_pair = None
+        st.session_state.blind_test_2_comparison_count = 0
+        st.session_state.blind_test_2_results_history = []
+    
+    st.session_state.blind_test_2_sentences = sentences
+    st.session_state.blind_test_2_sentences_hash = sentences_hash
+    st.caption(f"📝 {len(sentences)} sentences loaded")
+    
+    can_start = (
+        len(st.session_state.get("blind_test_2_selected_competitors", [])) >= 2 and 
+        len(st.session_state.blind_test_2_sentences) >= 1
+    )
+    
+    # Center the button and make it smaller
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("Start Voice Battle", type="primary", disabled=not can_start, key="start_battle_2"):
+            # Randomly select 2 competitors from selected pool ONCE at start
+            selected_pool = st.session_state.blind_test_2_selected_competitors
+            if len(selected_pool) >= 2:
+                import random
+                # Randomly pick 2 competitors for the entire battle
+                if len(selected_pool) == 2:
+                    final_competitors = selected_pool
+                else:
+                    final_competitors = random.sample(selected_pool, 2)
+                
+                # Store the final 2 competitors for all comparisons
+                st.session_state.blind_test_2_final_competitors = final_competitors
+                
+                # Show which 2 were selected
+                comp_names = [TTS_PROVIDERS[c].name for c in final_competitors]
+                st.info(f"🎯 Selected for battle: {comp_names[0]} vs {comp_names[1]}")
+            
+            st.session_state.blind_test_2_setup_complete = True
+            st.session_state.blind_test_2_comparison_count = 0
+            st.session_state.blind_test_2_results_history = []
+            st.session_state.blind_test_2_current_pair = None  # Clear any existing pair
+            st.rerun()
+    
+    if not can_start:
+        pass
 
 def display_blind_test_setup(configured_providers: List[str]):
     """Display the blind test setup page"""
@@ -751,6 +981,135 @@ Hello, how can I assist you today with your account inquiry?""",
     if not can_start:
         st.caption("Select a competitor and ensure sentences are loaded")
 
+def display_blind_test_2_comparison():
+    """Display the active blind test 2 comparison"""
+    from config import get_voices_by_gender, get_voice_gender
+    import random
+    
+    # Check if we should show final results (either completed or user clicked End Test)
+    if st.session_state.get("show_final_results_2", False):
+        # Clear the comparison view first to ensure full-width display
+        st.session_state.blind_test_2_current_pair = None
+        # Display full-width final results
+        display_final_results_2()
+        return
+    
+    # Check if we need to generate a new pair
+    force_regen = st.session_state.get("force_regenerate_2", False)
+    if st.session_state.blind_test_2_current_pair is None or force_regen:
+        # Clear the force flag
+        st.session_state.force_regenerate_2 = False
+        # Force clear any cached audio state before generating new comparison
+        if "blind_test_2_audio_played" in st.session_state:
+            st.session_state.blind_test_2_audio_played = {"A": 0, "B": 0}
+        # CRITICAL: Clear the pair again to ensure no stale data
+        st.session_state.blind_test_2_current_pair = None
+        print(f"[DEBUG] Generating new comparison (force_regen={force_regen})")
+        generate_next_comparison_2()
+        return
+    
+    pair = st.session_state.blind_test_2_current_pair
+    
+    # Validate that the current pair's text is still in the sentences list
+    # If sentences were changed, the pair might have old text - regenerate it
+    if pair and pair.get("text"):
+        current_text = pair.get("text")
+        sentences = st.session_state.get("blind_test_2_sentences", [])
+        if sentences and current_text not in sentences:
+            # Current pair has text that's no longer in sentences - regenerate
+            st.session_state.blind_test_2_current_pair = None
+            generate_next_comparison_2()
+            return
+        
+        # Additional validation: Check if this pair was generated with a different comparison count
+        # This ensures we don't show stale audio from a previous comparison
+        pair_comparison_id = pair.get("comparison_id", "")
+        expected_comparison_id = f"{st.session_state.blind_test_2_comparison_count}_"
+        if pair_comparison_id and not pair_comparison_id.startswith(expected_comparison_id):
+            # Pair is from a different comparison - regenerate
+            st.session_state.blind_test_2_current_pair = None
+            generate_next_comparison_2()
+            return
+    
+    if pair is None or pair.get("error"):
+        error_msg = pair.get("message", "Failed to generate comparison.") if pair else "Failed to generate comparison."
+        st.error(f"⚠️ {error_msg}")
+        if st.button("Retry", type="primary", key="retry_2"):
+            st.session_state.blind_test_2_current_pair = None
+            st.rerun()
+        return
+    
+    # Create unique key for this comparison using generation timestamp
+    generated_at = pair.get("generated_at", 0)
+    comparison_key = f"{st.session_state.blind_test_2_comparison_count}_{int(generated_at)}"
+    
+    # CRITICAL DEBUG: Log what we're about to display
+    print(f"[DISPLAY DEBUG] Displaying pair:")
+    print(f"  - Text: '{pair['text'][:60]}...'")
+    print(f"  - Comparison key: {comparison_key}")
+    print(f"  - Generated at: {generated_at}")
+    if pair.get('sample_a') and hasattr(pair['sample_a'], 'text'):
+        print(f"  - Sample A text: '{pair['sample_a'].text[:60] if pair['sample_a'].text else 'N/A'}...'")
+    if pair.get('sample_b') and hasattr(pair['sample_b'], 'text'):
+        print(f"  - Sample B text: '{pair['sample_b'].text[:60] if pair['sample_b'].text else 'N/A'}...'")
+    
+    # Progress indicator
+    progress = st.session_state.blind_test_2_comparison_count / st.session_state.blind_test_2_max_comparisons
+    st.progress(progress)
+    st.caption(f"Comparison {st.session_state.blind_test_2_comparison_count + 1} of {st.session_state.blind_test_2_max_comparisons}")
+    
+    # Display the prompt/sentence - sleek gray design (no purple border)
+    st.markdown(f"""
+    <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin: 8px 0;">
+        <span style="color: #666; font-size: 0.85em; font-weight: 500;">PROMPT</span>
+        <p style="color: #333; font-size: 1em; margin: 4px 0 0 0; line-height: 1.5;">{pair['text']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<p style='color: #888; font-size: 0.9em; margin: 16px 0 8px 0;'>Vote to reveal your model preference</p>", unsafe_allow_html=True)
+    
+    # Audio players side by side with unique keys
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        display_audio_player(pair['sample_a'], "A", "left", comparison_key)
+        # Add spacing and center the button
+        st.markdown('<div style="margin-top: 16px;"></div>', unsafe_allow_html=True)
+        button_col1, button_col2, button_col3 = st.columns([1, 2, 1])
+        with button_col2:
+            if st.button("Vote A", type="primary", key="vote_a_2", use_container_width=True):
+                handle_vote_2("A", pair)
+    
+    with col2:
+        # Validate audio text matches displayed text before displaying
+        sample_b = pair['sample_b']
+        if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+            audio_text = sample_b.metadata.get('generated_text', '')
+            if audio_text and audio_text != pair['text']:
+                st.error(f"⚠️ Audio text mismatch detected! Regenerating...")
+                st.session_state.blind_test_2_current_pair = None
+                st.rerun()
+                return
+        display_audio_player(pair['sample_b'], "B", "right", comparison_key)
+        # Add spacing and center the button
+        st.markdown('<div style="margin-top: 16px;"></div>', unsafe_allow_html=True)
+        button_col1, button_col2, button_col3 = st.columns([1, 2, 1])
+        with button_col2:
+            if st.button("Vote B", type="primary", key="vote_b_2", use_container_width=True):
+                handle_vote_2("B", pair)
+    
+    st.divider()
+    
+    # Action button - End Test only (centered, medium size)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("End Test", use_container_width=True, type="secondary", key="end_test_2"):
+            # Set flag to show final results, but keep setup_complete True so we stay in comparison view
+            st.session_state.show_final_results_2 = True
+            st.session_state.blind_test_2_current_pair = None
+            st.rerun()
+            return
+
 
 def display_blind_test_comparison():
     """Display the active blind test comparison"""
@@ -911,6 +1270,651 @@ def display_audio_player(result, label: str, side: str, unique_key: str = ""):
     st.audio(result.audio_data, format="audio/mp3")
 
 
+def generate_next_comparison_2():
+    """Generate the next comparison pair for Blind Test 2 - Randomly selects 2 competitors from selected pool"""
+    from config import get_voices_by_gender, get_voice_gender
+    import random
+    import time
+    
+    print(f"[GENERATE DEBUG] Starting generate_next_comparison_2 for comparison #{st.session_state.blind_test_2_comparison_count}")
+    
+    # Check if we've reached max comparisons
+    if st.session_state.blind_test_2_comparison_count >= st.session_state.blind_test_2_max_comparisons:
+        st.session_state.show_final_results_2 = True
+        st.rerun()
+        return
+    
+    # Get gender from setup (selected once at start)
+    gender_filter = st.session_state.blind_test_2_gender_filter
+    comparison_index = st.session_state.blind_test_2_comparison_count
+    
+    # FORCE CLEAR any existing pair first to prevent stale audio
+    st.session_state.blind_test_2_current_pair = None
+    
+    # Generate a unique generation ID for this comparison
+    generation_id = f"gen_{int(time.time() * 1000)}_{st.session_state.blind_test_2_comparison_count}"
+    print(f"[GENERATE DEBUG] Generation ID: {generation_id}")
+    
+    # Get a random sentence
+    sentences = st.session_state.blind_test_2_sentences
+    if not sentences:
+        st.error("No sentences available")
+        return
+    
+    # CRITICAL: Track which sentences have been used to ensure variety
+    if "used_sentences_2" not in st.session_state:
+        st.session_state.used_sentences_2 = []
+    
+    # Get available sentences (ones not used yet, or all if all have been used)
+    available_sentences = [s for s in sentences if s not in st.session_state.used_sentences_2]
+    
+    # If all sentences have been used, reset and start fresh
+    if not available_sentences:
+        st.session_state.used_sentences_2 = []
+        available_sentences = sentences
+    
+    # Select a random sentence from available ones
+    text = random.choice(available_sentences)
+    
+    # Mark this sentence as used
+    st.session_state.used_sentences_2.append(text)
+    
+    # CRITICAL DEBUG: Log the selected text
+    print(f"[CRITICAL DEBUG] Selected sentence #{len(st.session_state.used_sentences_2)}: '{text[:80]}...'")
+    print(f"[CRITICAL DEBUG] Available sentences: {len(available_sentences)}, Total: {len(sentences)}")
+    
+    # Get the final 2 competitors selected at start (locked in for all comparisons)
+    final_competitors = st.session_state.get("blind_test_2_final_competitors")
+    if not final_competitors or len(final_competitors) != 2:
+        st.error("Final competitors not selected. Please restart the test.")
+        return
+    
+    competitor_a_id, competitor_b_id = final_competitors[0], final_competitors[1]
+    
+    print(f"[COMPETITOR SELECTION] Using locked competitors: {competitor_a_id} vs {competitor_b_id} (Comparison #{comparison_index + 1})")
+    
+    # Get voices for competitor A matching gender
+    competitor_a_voices = get_voices_by_gender(competitor_a_id, gender_filter)
+    if competitor_a_id in TTS_PROVIDERS:
+        supported_voices_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+        competitor_a_voices = [v for v in competitor_a_voices if v in supported_voices_set]
+    
+    # CRITICAL: For Cartesia, ALWAYS get fresh list and verify it's in voice_id_map
+    if competitor_a_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj = TTSProviderFactory.create_provider(competitor_a_id)
+            if hasattr(provider_obj, 'voice_id_map'):
+                # Get completely fresh gender-filtered list
+                fresh_a = get_voices_by_gender(competitor_a_id, gender_filter)
+                if competitor_a_id in TTS_PROVIDERS:
+                    supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
+                    competitor_a_voices = [
+                        v for v in fresh_a 
+                        if v in supported_set and 
+                        v in provider_obj.voice_id_map and
+                        TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and
+                        TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
+                    ]
+                    print(f"[CARTESIA PRE-FILTER] Competitor A: Filtered to {len(competitor_a_voices)} {gender_filter} voices")
+        except Exception as e:
+            print(f"Warning: Could not pre-filter Cartesia voices for A: {e}")
+    
+    # If no voices found, try from voice_info
+    if not competitor_a_voices and competitor_a_id in TTS_PROVIDERS:
+        competitor_a_voice_info = TTS_PROVIDERS[competitor_a_id].voice_info
+        supported_voices_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+        competitor_a_voices = [
+            v for v, info in competitor_a_voice_info.items() 
+            if info.gender == gender_filter and v in supported_voices_set
+        ]
+    
+    if not competitor_a_voices:
+        st.error(f"Competitor {TTS_PROVIDERS[competitor_a_id].name} doesn't have any {gender_filter} voices available.")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    # Get voices for competitor B matching gender
+    competitor_b_voices = get_voices_by_gender(competitor_b_id, gender_filter)
+    if competitor_b_id in TTS_PROVIDERS:
+        supported_voices_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+        competitor_b_voices = [v for v in competitor_b_voices if v in supported_voices_set]
+    
+    # CRITICAL: For Cartesia, ALWAYS get fresh list and verify it's in voice_id_map
+    if competitor_b_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj = TTSProviderFactory.create_provider(competitor_b_id)
+            if hasattr(provider_obj, 'voice_id_map'):
+                # Get completely fresh gender-filtered list
+                fresh_b = get_voices_by_gender(competitor_b_id, gender_filter)
+                if competitor_b_id in TTS_PROVIDERS:
+                    supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
+                    competitor_b_voices = [
+                        v for v in fresh_b 
+                        if v in supported_set and 
+                        v in provider_obj.voice_id_map and
+                        TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and
+                        TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
+                    ]
+                    print(f"[CARTESIA PRE-FILTER] Competitor B: Filtered to {len(competitor_b_voices)} {gender_filter} voices")
+        except Exception as e:
+            print(f"Warning: Could not pre-filter Cartesia voices for B: {e}")
+    
+    # If no voices found, try from voice_info
+    if not competitor_b_voices and competitor_b_id in TTS_PROVIDERS:
+        competitor_b_voice_info = TTS_PROVIDERS[competitor_b_id].voice_info
+        supported_voices_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+        competitor_b_voices = [
+            v for v, info in competitor_b_voice_info.items() 
+            if info.gender == gender_filter and v in supported_voices_set
+        ]
+    
+    if not competitor_b_voices:
+        st.error(f"Competitor {TTS_PROVIDERS[competitor_b_id].name} doesn't have any {gender_filter} voices available.")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    # CRITICAL: Re-verify voice lists contain ONLY correct gender voices before selection
+    # This is especially important for Cartesia
+    competitor_a_voices = [v for v in competitor_a_voices 
+                          if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
+                          TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter]
+    competitor_b_voices = [v for v in competitor_b_voices 
+                          if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
+                          TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter]
+    
+    if not competitor_a_voices:
+        st.error(f"CRITICAL: Competitor A ({TTS_PROVIDERS[competitor_a_id].name}) has no {gender_filter} voices after filtering")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    if not competitor_b_voices:
+        st.error(f"CRITICAL: Competitor B ({TTS_PROVIDERS[competitor_b_id].name}) has no {gender_filter} voices after filtering")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    # CRITICAL: One final filter to ensure ONLY correct gender voices remain
+    competitor_a_voices = [
+        v for v in competitor_a_voices 
+        if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
+        TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
+    ]
+    competitor_b_voices = [
+        v for v in competitor_b_voices 
+        if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
+        TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
+    ]
+    
+    if not competitor_a_voices or not competitor_b_voices:
+        st.error(f"CRITICAL: No {gender_filter} voices available after final filtering")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    # Shuffle through voices for each competitor based on comparison count
+    # This ensures variety across comparisons while using the selected gender
+    competitor_a_voice_index = comparison_index % len(competitor_a_voices)
+    competitor_b_voice_index = comparison_index % len(competitor_b_voices)
+    
+    # CRITICAL: Before selecting, verify ALL voices in list match gender
+    competitor_a_voices = [
+        v for v in competitor_a_voices 
+        if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
+        TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
+    ]
+    competitor_b_voices = [
+        v for v in competitor_b_voices 
+        if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
+        TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
+    ]
+    
+    if not competitor_a_voices or not competitor_b_voices:
+        st.error(f"CRITICAL: No {gender_filter} voices available after final gender check")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    competitor_a_voice = competitor_a_voices[competitor_a_voice_index % len(competitor_a_voices)]
+    competitor_b_voice = competitor_b_voices[competitor_b_voice_index % len(competitor_b_voices)]
+    
+    # IMMEDIATE VERIFICATION: Double-check selected voices match gender
+    selected_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+    selected_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+    
+    # If wrong, force use first voice from filtered list
+    if not selected_a_info or selected_a_info.gender != gender_filter:
+        print(f"[CRITICAL] Competitor A voice {competitor_a_voice} wrong gender! Using first correct voice.")
+        competitor_a_voice = competitor_a_voices[0]
+        selected_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+        if not selected_a_info or selected_a_info.gender != gender_filter:
+            st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor A")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    if not selected_b_info or selected_b_info.gender != gender_filter:
+        print(f"[CRITICAL] Competitor B voice {competitor_b_voice} wrong gender! Using first correct voice.")
+        competitor_b_voice = competitor_b_voices[0]
+        selected_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+        if not selected_b_info or selected_b_info.gender != gender_filter:
+            st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor B")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    # IMMEDIATE VERIFICATION: Check voices right after selection (before any Cartesia handling)
+    competitor_a_voice_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+    competitor_b_voice_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+    
+    # CRITICAL: If wrong gender detected, this should NEVER happen after filtering, but verify anyway
+    if not competitor_a_voice_info or competitor_a_voice_info.gender != gender_filter:
+        print(f"[CRITICAL ERROR] Competitor A voice {competitor_a_voice} is {competitor_a_voice_info.gender if competitor_a_voice_info else 'unknown'}, expected {gender_filter}")
+        # Get completely fresh list
+        fresh_a = get_voices_by_gender(competitor_a_id, gender_filter)
+        if competitor_a_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+            fresh_a = [v for v in fresh_a if v in supported_set]
+        if fresh_a:
+            competitor_a_voice = fresh_a[0]
+            competitor_a_voice_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+            print(f"[EMERGENCY FIX] Competitor A set to {competitor_a_voice} ({competitor_a_voice_info.gender if competitor_a_voice_info else 'unknown'})")
+        else:
+            st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor A")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    if not competitor_b_voice_info or competitor_b_voice_info.gender != gender_filter:
+        print(f"[CRITICAL ERROR] Competitor B voice {competitor_b_voice} is {competitor_b_voice_info.gender if competitor_b_voice_info else 'unknown'}, expected {gender_filter}")
+        # Get completely fresh list
+        fresh_b = get_voices_by_gender(competitor_b_id, gender_filter)
+        if competitor_b_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+            fresh_b = [v for v in fresh_b if v in supported_set]
+        if fresh_b:
+            competitor_b_voice = fresh_b[0]
+            competitor_b_voice_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+            print(f"[EMERGENCY FIX] Competitor B set to {competitor_b_voice} ({competitor_b_voice_info.gender if competitor_b_voice_info else 'unknown'})")
+        else:
+            st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor B")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    # CRITICAL: Verify gender matches for both voices before proceeding
+    
+    # Fix competitor A if gender doesn't match
+    if not competitor_a_voice_info or competitor_a_voice_info.gender != gender_filter:
+        print(f"[GENDER FIX] Competitor A voice {competitor_a_voice} is {competitor_a_voice_info.gender if competitor_a_voice_info else 'unknown'}, expected {gender_filter}")
+        correct_a_voices = [v for v in competitor_a_voices if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter]
+        if correct_a_voices:
+            competitor_a_voice = correct_a_voices[competitor_a_voice_index % len(correct_a_voices)]
+            competitor_a_voice_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+            print(f"[GENDER FIX] Fixed Competitor A to {competitor_a_voice} ({competitor_a_voice_info.gender})")
+        else:
+            st.error(f"Competitor A ({TTS_PROVIDERS[competitor_a_id].name}) has no {gender_filter} voices")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    # Fix competitor B if gender doesn't match
+    if not competitor_b_voice_info or competitor_b_voice_info.gender != gender_filter:
+        print(f"[GENDER FIX] Competitor B voice {competitor_b_voice} is {competitor_b_voice_info.gender if competitor_b_voice_info else 'unknown'}, expected {gender_filter}")
+        correct_b_voices = [v for v in competitor_b_voices if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter]
+        if correct_b_voices:
+            competitor_b_voice = correct_b_voices[competitor_b_voice_index % len(correct_b_voices)]
+            competitor_b_voice_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+            print(f"[GENDER FIX] Fixed Competitor B to {competitor_b_voice} ({competitor_b_voice_info.gender})")
+        else:
+            st.error(f"Competitor B ({TTS_PROVIDERS[competitor_b_id].name}) has no {gender_filter} voices")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    print(f"[VOICE SELECTION] Competitor A ({competitor_a_id}): {competitor_a_voice} ({competitor_a_voice_info.gender}) - voice {competitor_a_voice_index + 1} of {len(competitor_a_voices)}")
+    print(f"[VOICE SELECTION] Competitor B ({competitor_b_id}): {competitor_b_voice} ({competitor_b_voice_info.gender}) - voice {competitor_b_voice_index + 1} of {len(competitor_b_voices)}")
+    
+    # Special handling for Cartesia providers - ensure voice is in map AND matches gender
+    # CRITICAL: For Cartesia, ALWAYS get fresh gender-filtered list - don't trust any previous lists
+    for comp_id, comp_voice in [(competitor_a_id, competitor_a_voice), (competitor_b_id, competitor_b_voice)]:
+        if comp_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+            try:
+                provider_obj = TTSProviderFactory.create_provider(comp_id)
+                if hasattr(provider_obj, 'voice_id_map'):
+                    # FOR CARTESIA: ALWAYS get fresh gender-filtered list and re-verify
+                    # Don't trust any previous selection - start completely fresh every time
+                    voice_info_check = TTS_PROVIDERS[comp_id].voice_info.get(comp_voice)
+                    voice_in_map = comp_voice in provider_obj.voice_id_map
+                    gender_matches = voice_info_check and voice_info_check.gender == gender_filter
+                    
+                    # ALWAYS get completely fresh list for Cartesia - don't trust any previous lists
+                    fresh_cartesia_voices = get_voices_by_gender(comp_id, gender_filter)
+                    if comp_id in TTS_PROVIDERS:
+                        supported_set = set(TTS_PROVIDERS[comp_id].supported_voices)
+                        # Filter to only voices that are in voice_id_map AND supported AND match gender
+                        fresh_cartesia_voices = [
+                            v for v in fresh_cartesia_voices 
+                            if v in supported_set and 
+                            v in provider_obj.voice_id_map and
+                            TTS_PROVIDERS[comp_id].voice_info.get(v) and
+                            TTS_PROVIDERS[comp_id].voice_info[v].gender == gender_filter
+                        ]
+                    
+                    # If current voice is not in fresh list or doesn't match, replace it
+                    if not voice_in_map or not gender_matches or comp_voice not in fresh_cartesia_voices:
+                        if fresh_cartesia_voices:
+                            # Use index-based selection from fresh list
+                            voice_index = competitor_a_voice_index if comp_id == competitor_a_id else competitor_b_voice_index
+                            new_voice = fresh_cartesia_voices[voice_index % len(fresh_cartesia_voices)]
+                            new_voice_info = TTS_PROVIDERS[comp_id].voice_info.get(new_voice)
+                            
+                            # FINAL VERIFY the new voice matches gender
+                            if new_voice_info and new_voice_info.gender == gender_filter:
+                                if comp_id == competitor_a_id:
+                                    competitor_a_voice = new_voice
+                                    competitor_a_voice_info = new_voice_info
+                                else:
+                                    competitor_b_voice = new_voice
+                                    competitor_b_voice_info = new_voice_info
+                                print(f"[CARTESIA FIX] Set {comp_id} to {new_voice} (gender: {new_voice_info.gender})")
+                            else:
+                                # Last resort: use first voice from fresh list
+                                final_voice = fresh_cartesia_voices[0]
+                                final_voice_info = TTS_PROVIDERS[comp_id].voice_info.get(final_voice)
+                                if comp_id == competitor_a_id:
+                                    competitor_a_voice = final_voice
+                                    competitor_a_voice_info = final_voice_info
+                                else:
+                                    competitor_b_voice = final_voice
+                                    competitor_b_voice_info = final_voice_info
+                                print(f"[CARTESIA EMERGENCY] Set {comp_id} to {final_voice} (gender: {final_voice_info.gender if final_voice_info else 'unknown'})")
+                        else:
+                            st.error(f"No {gender_filter} voice found in Cartesia for {TTS_PROVIDERS[comp_id].name}")
+                            st.session_state.blind_test_2_current_pair = None
+                            return
+                    else:
+                        # Voice is valid, but verify one more time anyway
+                        verify_info = TTS_PROVIDERS[comp_id].voice_info.get(comp_voice)
+                        if not verify_info or verify_info.gender != gender_filter:
+                            # Get fresh list and fix
+                            if fresh_cartesia_voices:
+                                final_voice = fresh_cartesia_voices[0]
+                                final_voice_info = TTS_PROVIDERS[comp_id].voice_info.get(final_voice)
+                                if comp_id == competitor_a_id:
+                                    competitor_a_voice = final_voice
+                                    competitor_a_voice_info = final_voice_info
+                                else:
+                                    competitor_b_voice = final_voice
+                                    competitor_b_voice_info = final_voice_info
+                                print(f"[CARTESIA FINAL FIX] Corrected {comp_id} to {final_voice} (gender: {final_voice_info.gender if final_voice_info else 'unknown'})")
+            except Exception as e:
+                print(f"Warning: Could not validate Cartesia voice: {e}")
+    
+    # POST-CARTESIA VERIFICATION: Immediately verify both voices after Cartesia handling
+    post_cartesia_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+    post_cartesia_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+    
+    if competitor_a_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        if not post_cartesia_a_info or post_cartesia_a_info.gender != gender_filter:
+            print(f"[POST-CARTESIA CHECK] Competitor A still wrong! Getting fresh list...")
+            fresh_a = get_voices_by_gender(competitor_a_id, gender_filter)
+            if competitor_a_id in TTS_PROVIDERS:
+                supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+                fresh_a = [v for v in fresh_a if v in supported_set]
+            if fresh_a:
+                competitor_a_voice = fresh_a[0]
+                post_cartesia_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+                print(f"[POST-CARTESIA FIX] Competitor A set to {competitor_a_voice} ({post_cartesia_a_info.gender if post_cartesia_a_info else 'unknown'})")
+    
+    if competitor_b_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        if not post_cartesia_b_info or post_cartesia_b_info.gender != gender_filter:
+            print(f"[POST-CARTESIA CHECK] Competitor B still wrong! Getting fresh list...")
+            fresh_b = get_voices_by_gender(competitor_b_id, gender_filter)
+            if competitor_b_id in TTS_PROVIDERS:
+                supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+                fresh_b = [v for v in fresh_b if v in supported_set]
+            if fresh_b:
+                competitor_b_voice = fresh_b[0]
+                post_cartesia_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+                print(f"[POST-CARTESIA FIX] Competitor B set to {competitor_b_voice} ({post_cartesia_b_info.gender if post_cartesia_b_info else 'unknown'})")
+    
+    # FINAL CRITICAL VERIFICATION: Double-check both voices match gender before generating audio
+    # Use get_voices_by_gender to get FRESH list of correct gender voices (don't trust previous lists)
+    final_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+    final_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+    
+    # Verify Competitor A - get fresh list if needed
+    if not final_a_info or final_a_info.gender != gender_filter:
+        print(f"[FINAL GENDER CHECK] ERROR: Competitor A voice {competitor_a_voice} is {final_a_info.gender if final_a_info else 'unknown'}, expected {gender_filter}")
+        # Get FRESH list of correct gender voices using get_voices_by_gender
+        fresh_a_voices = get_voices_by_gender(competitor_a_id, gender_filter)
+        if competitor_a_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+            fresh_a_voices = [v for v in fresh_a_voices if v in supported_set]
+        if fresh_a_voices:
+            # Use first valid voice of correct gender
+            competitor_a_voice = fresh_a_voices[0]
+            final_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+            print(f"[FINAL GENDER CHECK] FORCED Competitor A to {competitor_a_voice} ({final_a_info.gender if final_a_info else 'unknown'})")
+        else:
+            st.error(f"CRITICAL: Competitor A ({TTS_PROVIDERS[competitor_a_id].name}) has no {gender_filter} voices available")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    # Verify Competitor B - get fresh list if needed
+    if not final_b_info or final_b_info.gender != gender_filter:
+        print(f"[FINAL GENDER CHECK] ERROR: Competitor B voice {competitor_b_voice} is {final_b_info.gender if final_b_info else 'unknown'}, expected {gender_filter}")
+        # Get FRESH list of correct gender voices using get_voices_by_gender
+        fresh_b_voices = get_voices_by_gender(competitor_b_id, gender_filter)
+        if competitor_b_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+            fresh_b_voices = [v for v in fresh_b_voices if v in supported_set]
+        if fresh_b_voices:
+            # Use first valid voice of correct gender
+            competitor_b_voice = fresh_b_voices[0]
+            final_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+            print(f"[FINAL GENDER CHECK] FORCED Competitor B to {competitor_b_voice} ({final_b_info.gender if final_b_info else 'unknown'})")
+        else:
+            st.error(f"CRITICAL: Competitor B ({TTS_PROVIDERS[competitor_b_id].name}) has no {gender_filter} voices available")
+            st.session_state.blind_test_2_current_pair = None
+            return
+    
+    # ABSOLUTE FINAL CHECK - abort if still wrong
+    if not final_a_info or final_a_info.gender != gender_filter:
+        st.error(f"CRITICAL: Competitor A voice {competitor_a_voice} still has wrong gender: {final_a_info.gender if final_a_info else 'unknown'}")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    if not final_b_info or final_b_info.gender != gender_filter:
+        st.error(f"CRITICAL: Competitor B voice {competitor_b_voice} still has wrong gender: {final_b_info.gender if final_b_info else 'unknown'}")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    # ABSOLUTE FINAL VERIFICATION RIGHT BEFORE AUDIO GENERATION
+    # CRITICAL: For Cartesia, we MUST verify voice is in voice_id_map AND matches gender
+    # Re-check both voices one more time - if wrong, force correct from fresh gender-filtered list
+    
+    # Check Competitor A
+    pre_gen_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+    if competitor_a_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj_a = TTSProviderFactory.create_provider(competitor_a_id)
+            if hasattr(provider_obj_a, 'voice_id_map'):
+                # For Cartesia, voice MUST be in voice_id_map AND match gender
+                if competitor_a_voice not in provider_obj_a.voice_id_map or not pre_gen_a_info or pre_gen_a_info.gender != gender_filter:
+                    print(f"[CARTESIA PRE-GEN] Competitor A voice {competitor_a_voice} invalid! Getting fresh Cartesia list...")
+                    fresh_a_cartesia = get_voices_by_gender(competitor_a_id, gender_filter)
+                    if competitor_a_id in TTS_PROVIDERS:
+                        supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+                        # CRITICAL: Only use voices that are in voice_id_map AND match gender
+                        fresh_a_cartesia = [
+                            v for v in fresh_a_cartesia 
+                            if v in supported_set and 
+                            v in provider_obj_a.voice_id_map and
+                            TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and
+                            TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
+                        ]
+                    if fresh_a_cartesia:
+                        competitor_a_voice = fresh_a_cartesia[comparison_index % len(fresh_a_cartesia)]
+                        pre_gen_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+                        print(f"[CARTESIA PRE-GEN FIX] Competitor A set to {competitor_a_voice} ({pre_gen_a_info.gender if pre_gen_a_info else 'unknown'})")
+        except Exception as e:
+            print(f"Warning: Could not validate Cartesia voice for A: {e}")
+    
+    if not pre_gen_a_info or pre_gen_a_info.gender != gender_filter:
+        print(f"[PRE-GEN FIX] Competitor A voice {competitor_a_voice} wrong gender! Getting fresh list...")
+        fresh_a_final = get_voices_by_gender(competitor_a_id, gender_filter)
+        if competitor_a_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
+            fresh_a_final = [v for v in fresh_a_final if v in supported_set]
+        if fresh_a_final:
+            competitor_a_voice = fresh_a_final[comparison_index % len(fresh_a_final)]
+            pre_gen_a_info = TTS_PROVIDERS[competitor_a_id].voice_info.get(competitor_a_voice)
+            print(f"[PRE-GEN FIX] Competitor A set to {competitor_a_voice} ({pre_gen_a_info.gender if pre_gen_a_info else 'unknown'})")
+    
+    # Check Competitor B
+    pre_gen_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+    if competitor_b_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj_b = TTSProviderFactory.create_provider(competitor_b_id)
+            if hasattr(provider_obj_b, 'voice_id_map'):
+                # For Cartesia, voice MUST be in voice_id_map AND match gender
+                if competitor_b_voice not in provider_obj_b.voice_id_map or not pre_gen_b_info or pre_gen_b_info.gender != gender_filter:
+                    print(f"[CARTESIA PRE-GEN] Competitor B voice {competitor_b_voice} invalid! Getting fresh Cartesia list...")
+                    fresh_b_cartesia = get_voices_by_gender(competitor_b_id, gender_filter)
+                    if competitor_b_id in TTS_PROVIDERS:
+                        supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+                        # CRITICAL: Only use voices that are in voice_id_map AND match gender
+                        fresh_b_cartesia = [
+                            v for v in fresh_b_cartesia 
+                            if v in supported_set and 
+                            v in provider_obj_b.voice_id_map and
+                            TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and
+                            TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
+                        ]
+                    if fresh_b_cartesia:
+                        competitor_b_voice = fresh_b_cartesia[comparison_index % len(fresh_b_cartesia)]
+                        pre_gen_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+                        print(f"[CARTESIA PRE-GEN FIX] Competitor B set to {competitor_b_voice} ({pre_gen_b_info.gender if pre_gen_b_info else 'unknown'})")
+        except Exception as e:
+            print(f"Warning: Could not validate Cartesia voice for B: {e}")
+    
+    if not pre_gen_b_info or pre_gen_b_info.gender != gender_filter:
+        print(f"[PRE-GEN FIX] Competitor B voice {competitor_b_voice} wrong gender! Getting fresh list...")
+        fresh_b_final = get_voices_by_gender(competitor_b_id, gender_filter)
+        if competitor_b_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
+            fresh_b_final = [v for v in fresh_b_final if v in supported_set]
+        if fresh_b_final:
+            competitor_b_voice = fresh_b_final[comparison_index % len(fresh_b_final)]
+            pre_gen_b_info = TTS_PROVIDERS[competitor_b_id].voice_info.get(competitor_b_voice)
+            print(f"[PRE-GEN FIX] Competitor B set to {competitor_b_voice} ({pre_gen_b_info.gender if pre_gen_b_info else 'unknown'})")
+    
+    # Final abort check - if still wrong, don't generate
+    if not pre_gen_a_info or pre_gen_a_info.gender != gender_filter:
+        st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor A. Aborting.")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    if not pre_gen_b_info or pre_gen_b_info.gender != gender_filter:
+        st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor B. Aborting.")
+        st.session_state.blind_test_2_current_pair = None
+        return
+    
+    print(f"[FINAL VERIFICATION] ✓ Both voices confirmed: A={competitor_a_voice} ({pre_gen_a_info.gender}), B={competitor_b_voice} ({pre_gen_b_info.gender})")
+    
+    # Show loading placeholder while generating
+    loading_placeholder = st.empty()
+    loading_placeholder.info(f"Generating audio samples... This may take a few seconds.")
+    
+    # Generate samples (runs in parallel for speed)
+    print(f"[DEBUG] Generating audio for text: '{text[:50]}...' (Comparison #{st.session_state.blind_test_2_comparison_count})")
+    
+    try:
+        sample_a, sample_b = asyncio.run(generate_comparison_samples(
+            text, competitor_a_id, competitor_a_voice, competitor_b_id, competitor_b_voice
+        ))
+        
+        # Validate that samples were generated with the correct text
+        if sample_a and hasattr(sample_a, 'metadata') and sample_a.metadata:
+            generated_text_a = sample_a.metadata.get('text', '')
+            if generated_text_a and generated_text_a != text:
+                print(f"[WARNING] Sample A text mismatch! Expected: '{text[:50]}', Got: '{generated_text_a[:50]}'")
+        
+        if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+            generated_text_b = sample_b.metadata.get('text', '')
+            if generated_text_b and generated_text_b != text:
+                print(f"[WARNING] Sample B text mismatch! Expected: '{text[:50]}', Got: '{generated_text_b[:50]}'")
+                
+    except Exception as e:
+        loading_placeholder.error(f"Error generating samples: {str(e)}")
+        sample_a, sample_b = None, None
+    
+    # Clear loading message
+    loading_placeholder.empty()
+    
+    # Check if either sample failed
+    if sample_a is None or sample_b is None or not (sample_a.success if sample_a else False) or not (sample_b.success if sample_b else False):
+        # Show detailed error and allow retry
+        error_msg = "Both samples failed to generate."
+        error_details = []
+        
+        if sample_a:
+            if not sample_a.success:
+                error_details.append(f"Sample A ({TTS_PROVIDERS[competitor_a_id].name}): {sample_a.error_message if hasattr(sample_a, 'error_message') and sample_a.error_message else 'Unknown error'}")
+        else:
+            error_details.append(f"Sample A ({TTS_PROVIDERS[competitor_a_id].name}): Failed to generate")
+            
+        if sample_b:
+            if not sample_b.success:
+                error_details.append(f"Sample B ({TTS_PROVIDERS[competitor_b_id].name}): {sample_b.error_message if hasattr(sample_b, 'error_message') and sample_b.error_message else 'Unknown error'}")
+        else:
+            error_details.append(f"Sample B ({TTS_PROVIDERS[competitor_b_id].name}): Failed to generate")
+        
+        if error_details:
+            error_msg = " | ".join(error_details)
+        
+        st.session_state.blind_test_2_current_pair = {"error": True, "message": error_msg}
+        st.rerun()
+        return
+    
+    # CRITICAL FIX: Validate text matches before storing
+    if sample_a and sample_a.success:
+        if not hasattr(sample_a, 'metadata') or sample_a.metadata is None:
+            sample_a.metadata = {}
+        sample_a.metadata['generated_text'] = text
+        sample_a.metadata['comparison_num'] = st.session_state.blind_test_2_comparison_count
+    
+    if sample_b and sample_b.success:
+        if not hasattr(sample_b, 'metadata') or sample_b.metadata is None:
+            sample_b.metadata = {}
+        sample_b.metadata['generated_text'] = text
+        sample_b.metadata['comparison_num'] = st.session_state.blind_test_2_comparison_count
+    
+    # Randomize order (50/50 chance A or B)
+    a_is_first = random.random() > 0.5
+    
+    # Generate a unique timestamp for this comparison to prevent caching
+    unique_timestamp = time.time()
+    comparison_id = f"{st.session_state.blind_test_2_comparison_count}_{unique_timestamp}"
+    
+    # Log for debugging
+    print(f"[DEBUG] Storing pair - Text: '{text[:60]}...', Comparison #{st.session_state.blind_test_2_comparison_count}")
+    
+    if a_is_first:
+        st.session_state.blind_test_2_current_pair = {
+            "sample_a": sample_a, "sample_b": sample_b,
+            "provider_a": competitor_a_id, "provider_b": competitor_b_id,
+            "voice_a": competitor_a_voice, "voice_b": competitor_b_voice,
+            "text": text, "generated_at": unique_timestamp,
+            "comparison_id": comparison_id
+        }
+    else:
+        st.session_state.blind_test_2_current_pair = {
+            "sample_a": sample_b, "sample_b": sample_a,
+            "provider_a": competitor_b_id, "provider_b": competitor_a_id,
+            "voice_a": competitor_b_voice, "voice_b": competitor_a_voice,
+            "text": text, "generated_at": unique_timestamp,
+            "comparison_id": comparison_id
+        }
+    
+    st.session_state.blind_test_2_audio_played = {"A": 0, "B": 0}
+    st.rerun()
+
+
 def generate_next_comparison():
     """Generate the next comparison pair - ALWAYS generates fresh audio"""
     from config import get_voices_by_gender, get_voice_gender
@@ -1041,6 +2045,27 @@ def generate_next_comparison():
         supported_voices_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
         competitor_voices = [v for v in competitor_voices if v in supported_voices_set]
     
+    # CRITICAL: For Cartesia, ALWAYS get fresh list and verify it's in voice_id_map BEFORE selection
+    if competitor_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj = TTSProviderFactory.create_provider(competitor_id)
+            if hasattr(provider_obj, 'voice_id_map'):
+                # Get completely fresh gender-filtered list
+                fresh_voices = get_voices_by_gender(competitor_id, gender_filter)
+                if competitor_id in TTS_PROVIDERS:
+                    supported_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
+                    competitor_voices = [
+                        v for v in fresh_voices 
+                        if v in supported_set and 
+                        v in provider_obj.voice_id_map and
+                        TTS_PROVIDERS[competitor_id].voice_info.get(v) and
+                        TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
+                    ]
+                    print(f"[CARTESIA PRE-FILTER] Unranked Blind Test: Filtered to {len(competitor_voices)} {gender_filter} voices")
+        except Exception as e:
+            print(f"Warning: Could not pre-filter Cartesia voices: {e}")
+    
     # If no voices found for this gender, try to find any voice with matching gender from voice_info
     if not competitor_voices and competitor_id in TTS_PROVIDERS:
         competitor_voice_info = TTS_PROVIDERS[competitor_id].voice_info
@@ -1056,6 +2081,19 @@ def generate_next_comparison():
         st.session_state.blind_test_current_pair = None
         return
     
+    # CRITICAL: Final filter to ensure ONLY correct gender voices remain - do this MULTIPLE times
+    for _ in range(3):  # Triple filter to be absolutely sure
+        competitor_voices = [
+            v for v in competitor_voices 
+            if TTS_PROVIDERS[competitor_id].voice_info.get(v) and 
+            TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
+        ]
+    
+    if not competitor_voices:
+        st.error(f"CRITICAL: No {gender_filter} voices available after final filtering for {TTS_PROVIDERS[competitor_id].name}")
+        st.session_state.blind_test_current_pair = None
+        return
+    
     # Select from matching gender voices only
     # If only 1 voice available, use it; otherwise randomly pick one
     if len(competitor_voices) == 1:
@@ -1065,51 +2103,87 @@ def generate_next_comparison():
         competitor_voice = random.choice(competitor_voices)
         print(f"[GENDER DEBUG] Selected {gender_filter} voice for competitor: {competitor_voice} (from {len(competitor_voices)} options)")
     
-    # Special handling for Cartesia providers - validate voice exists in voice_id_map
-    # CRITICAL: Must ensure gender is maintained when validating Cartesia voices
+    # IMMEDIATE VERIFICATION: Double-check selected voice matches gender - if wrong, force correct
+    selected_voice_check = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+    if not selected_voice_check or selected_voice_check.gender != gender_filter:
+        print(f"[CRITICAL] Selected voice {competitor_voice} wrong gender! Getting fresh list and using first correct voice.")
+        # Get completely fresh list
+        fresh_final = get_voices_by_gender(competitor_id, gender_filter)
+        if competitor_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
+            fresh_final = [v for v in fresh_final if v in supported_set]
+            # Filter again by gender
+            fresh_final = [
+                v for v in fresh_final 
+                if TTS_PROVIDERS[competitor_id].voice_info.get(v) and 
+                TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
+            ]
+        if fresh_final:
+            competitor_voice = fresh_final[0]
+            selected_voice_check = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+            print(f"[CRITICAL FIX] Set competitor to {competitor_voice} ({selected_voice_check.gender if selected_voice_check else 'unknown'})")
+        else:
+            st.error(f"CRITICAL: Cannot find {gender_filter} voice for {TTS_PROVIDERS[competitor_id].name}")
+            st.session_state.blind_test_current_pair = None
+            return
+    
+    # Final verification - if still wrong, abort
+    if not selected_voice_check or selected_voice_check.gender != gender_filter:
+        st.error(f"CRITICAL: Voice {competitor_voice} still has wrong gender. Aborting.")
+        st.session_state.blind_test_current_pair = None
+        return
+    
+    # Special handling for Cartesia providers - ensure voice is in map AND matches gender
     if competitor_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
         try:
             provider_obj = TTSProviderFactory.create_provider(competitor_id)
             if hasattr(provider_obj, 'voice_id_map'):
-                # First verify the selected voice is in map AND matches gender
-                voice_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+                voice_info_check = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
                 voice_in_map = competitor_voice in provider_obj.voice_id_map
-                gender_matches = voice_info and voice_info.gender == gender_filter
+                gender_matches = voice_info_check and voice_info_check.gender == gender_filter
                 
                 if not voice_in_map or not gender_matches:
-                    # Find voices that are: 1) in voice_id_map, 2) match gender, 3) in supported_voices
+                    # Find valid voice that is: 1) in voice_id_map, 2) matches gender, 3) in supported_voices
                     valid_voices = [
                         v for v in competitor_voices 
                         if v in provider_obj.voice_id_map and
                         TTS_PROVIDERS[competitor_id].voice_info.get(v) and
                         TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
                     ]
-                    
                     if valid_voices:
-                        competitor_voice = random.choice(valid_voices)
-                        print(f"[CARTESIA DEBUG] Selected valid voice {competitor_voice} (gender: {gender_filter})")
+                        # Use index-based selection to maintain consistency (not random)
+                        voice_index = competitor_voices.index(competitor_voice) if competitor_voice in competitor_voices else 0
+                        competitor_voice = valid_voices[voice_index % len(valid_voices)]
+                        voice_info_check = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+                        print(f"[CARTESIA FIX] Fixed {competitor_id} voice to {competitor_voice} (gender: {gender_filter})")
                     else:
-                        # Last resort: find any voice matching gender from voice_id_map
-                        all_matching = [
-                            v for v, info in TTS_PROVIDERS[competitor_id].voice_info.items()
-                            if info.gender == gender_filter and 
-                            v in provider_obj.voice_id_map and 
-                            v in TTS_PROVIDERS[competitor_id].supported_voices
-                        ]
-                        if all_matching:
-                            competitor_voice = random.choice(all_matching)
-                            print(f"[CARTESIA DEBUG] Found alternative voice {competitor_voice} (gender: {gender_filter})")
-                        else:
-                            st.error(f"No {gender_filter} voice found in Cartesia voice mapping. Available: {list(provider_obj.voice_id_map.keys())}")
-                            st.session_state.blind_test_current_pair = None
-                            return
+                        st.error(f"No {gender_filter} voice found in Cartesia voice mapping for {TTS_PROVIDERS[competitor_id].name}")
+                        st.session_state.blind_test_current_pair = None
+                        return
                 else:
                     print(f"[CARTESIA DEBUG] Voice {competitor_voice} is valid (in map, gender: {gender_filter})")
         except Exception as e:
             print(f"Warning: Could not validate Cartesia voice: {e}")
     
+    # FINAL CRITICAL VERIFICATION: Double-check voice matches gender before generating audio
+    final_competitor_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+    if not final_competitor_info or final_competitor_info.gender != gender_filter:
+        print(f"[FINAL GENDER CHECK] ERROR: Competitor voice {competitor_voice} is {final_competitor_info.gender if final_competitor_info else 'unknown'}, expected {gender_filter}")
+        # Force correct gender voice
+        correct_voices = [v for v in competitor_voices if TTS_PROVIDERS[competitor_id].voice_info.get(v) and TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter]
+        if correct_voices:
+            competitor_voice = correct_voices[0]
+            final_competitor_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+            print(f"[FINAL GENDER CHECK] FORCED Competitor to {competitor_voice} ({final_competitor_info.gender})")
+        else:
+            st.error(f"CRITICAL: Competitor has no {gender_filter} voices available")
+            st.session_state.blind_test_current_pair = None
+            return
+    
+    print(f"[FINAL VERIFICATION] ✓ Competitor voice confirmed: {competitor_voice} ({final_competitor_info.gender})")
+    
     # Special handling for Sarvam - ensure voice matches gender
-    if competitor_id == "sarvam":
+    if competitor_id == "sarvam" or competitor_id == "sarvam_bulbul_v3":
         voice_info = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
         if not voice_info or voice_info.gender != gender_filter:
             print(f"[SARVAM DEBUG] Gender check: voice={competitor_voice}, expected={gender_filter}, got={voice_info.gender if voice_info else 'None'}")
@@ -1195,12 +2269,59 @@ def generate_next_comparison():
             st.session_state.blind_test_current_pair = None
             return
     
-    print(f"[GENDER FINAL] ✓ Verified: Murf: {murf_voice} ({murf_final_info.gender if murf_final_info else '?'}) vs Competitor: {competitor_voice} ({comp_final_info.gender if comp_final_info else '?'})")
+    # ABSOLUTE FINAL VERIFICATION RIGHT BEFORE AUDIO GENERATION (for Unranked Blind Test)
+    # CRITICAL: For Cartesia, we MUST verify voice is in voice_id_map AND matches gender
+    pre_gen_comp_info_vs = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+    
+    if competitor_id in ["cartesia_sonic2", "cartesia_turbo", "cartesia_sonic3"]:
+        try:
+            provider_obj_comp_vs = TTSProviderFactory.create_provider(competitor_id)
+            if hasattr(provider_obj_comp_vs, 'voice_id_map'):
+                # For Cartesia, voice MUST be in voice_id_map AND match gender
+                if competitor_voice not in provider_obj_comp_vs.voice_id_map or not pre_gen_comp_info_vs or pre_gen_comp_info_vs.gender != gender_filter:
+                    print(f"[CARTESIA PRE-GEN] Competitor voice {competitor_voice} invalid! Getting fresh Cartesia list...")
+                    fresh_comp_cartesia_vs = get_voices_by_gender(competitor_id, gender_filter)
+                    if competitor_id in TTS_PROVIDERS:
+                        supported_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
+                        # CRITICAL: Only use voices that are in voice_id_map AND match gender
+                        fresh_comp_cartesia_vs = [
+                            v for v in fresh_comp_cartesia_vs 
+                            if v in supported_set and 
+                            v in provider_obj_comp_vs.voice_id_map and
+                            TTS_PROVIDERS[competitor_id].voice_info.get(v) and
+                            TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
+                        ]
+                    if fresh_comp_cartesia_vs:
+                        competitor_voice = fresh_comp_cartesia_vs[comparison_index % len(fresh_comp_cartesia_vs)]
+                        pre_gen_comp_info_vs = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+                        print(f"[CARTESIA PRE-GEN FIX] Competitor set to {competitor_voice} ({pre_gen_comp_info_vs.gender if pre_gen_comp_info_vs else 'unknown'})")
+        except Exception as e:
+            print(f"Warning: Could not validate Cartesia voice: {e}")
+    
+    if not pre_gen_comp_info_vs or pre_gen_comp_info_vs.gender != gender_filter:
+        print(f"[PRE-GEN FIX] Competitor voice {competitor_voice} wrong gender! Getting fresh list...")
+        fresh_comp_final_vs = get_voices_by_gender(competitor_id, gender_filter)
+        if competitor_id in TTS_PROVIDERS:
+            supported_set = set(TTS_PROVIDERS[competitor_id].supported_voices)
+            fresh_comp_final_vs = [v for v in fresh_comp_final_vs if v in supported_set]
+        if fresh_comp_final_vs:
+            competitor_voice = fresh_comp_final_vs[comparison_index % len(fresh_comp_final_vs)]
+            pre_gen_comp_info_vs = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
+            print(f"[PRE-GEN FIX] Competitor set to {competitor_voice} ({pre_gen_comp_info_vs.gender if pre_gen_comp_info_vs else 'unknown'})")
+    
+    # Final abort check - if still wrong, don't generate
+    if not pre_gen_comp_info_vs or pre_gen_comp_info_vs.gender != gender_filter:
+        st.error(f"CRITICAL: Cannot find {gender_filter} voice for Competitor. Aborting.")
+        st.session_state.blind_test_current_pair = None
+        return
+    
+    print(f"[GENDER FINAL] ✓ Verified: Murf: {murf_voice} ({murf_final_info.gender if murf_final_info else '?'}) vs Competitor: {competitor_voice} ({pre_gen_comp_info_vs.gender if pre_gen_comp_info_vs else '?'})")
     
     # Additional safety check - this should never trigger if above logic works correctly
-    if murf_final_info and comp_final_info and murf_final_info.gender != comp_final_info.gender:
+    if murf_final_info and pre_gen_comp_info_vs and murf_final_info.gender != pre_gen_comp_info_vs.gender:
         print(f"[GENDER FINAL] ❌ CRITICAL ERROR: Gender mismatch detected! Aborting.")
-        st.error(f"Gender mismatch: Murf ({murf_final_info.gender}) vs Competitor ({comp_final_info.gender})")
+        st.error(f"Gender mismatch: Murf ({murf_final_info.gender}) vs Competitor ({pre_gen_comp_info_vs.gender})")
+        st.session_state.blind_test_current_pair = None
         return
     else:
         print(f"[GENDER FINAL] ✓ Gender match confirmed: {murf_final_info.gender if murf_final_info else gender_filter}")
@@ -1377,6 +2498,91 @@ async def generate_comparison_samples(text: str, provider_a: str, voice_a: str, 
     return result_a, result_b
 
 
+def handle_vote_2(choice: str, pair: dict):
+    """Handle a user vote from blind test 2 and update ELO ratings
+    
+    IMPORTANT: ELO ratings should ONLY be updated from blind test votes (user preferences),
+    NOT from quick test results (latency, TTFB, etc.). Quick test is for technical metrics only.
+    """
+    from database import db
+    
+    # Prevent double voting on same comparison
+    current_comparison = st.session_state.blind_test_2_comparison_count
+    if st.session_state.get("last_voted_comparison_2") == current_comparison:
+        return  # Already voted on this comparison
+    
+    # Mark this comparison as voted
+    st.session_state.last_voted_comparison_2 = current_comparison
+    
+    # CRITICAL FIX: Clear ALL audio-related state to force fresh generation
+    st.session_state.blind_test_2_current_pair = None
+    
+    # Force the next comparison to generate fresh audio
+    st.session_state.force_regenerate_2 = True
+    
+    print(f"[VOTE DEBUG] Vote recorded. Cleared pair. Next comparison will generate fresh audio.")
+    
+    # Determine winner and loser based on choice
+    # IMPORTANT: choice "A" means sample A won, choice "B" means sample B won
+    if choice == "A":
+        winner_provider = pair["provider_a"]
+        loser_provider = pair["provider_b"]
+        winner_voice = pair["voice_a"]
+        loser_voice = pair["voice_b"]
+    else:  # choice == "B"
+        winner_provider = pair["provider_b"]
+        loser_provider = pair["provider_a"]
+        winner_voice = pair["voice_b"]
+        loser_voice = pair["voice_a"]
+    
+    # Debug: Print winner/loser to verify
+    print(f"Vote: {choice} | Winner: {winner_provider} | Loser: {loser_provider}")
+    
+    # Update ELO ratings - winner should get higher rating, loser should get lower
+    try:
+        new_winner_rating, new_loser_rating = db.update_elo_ratings(
+            winner_provider, loser_provider, k_factor=32
+        )
+        print(f"ELO Updated - Winner ({winner_provider}): {new_winner_rating:.1f}, Loser ({loser_provider}): {new_loser_rating:.1f}")
+        
+        # Save vote to database
+        db.save_user_vote(
+            winner_provider,
+            loser_provider,
+            pair["text"][:100],
+            session_id=f"blind_battle_2_{current_comparison}"
+        )
+    except Exception as e:
+        print(f"Error updating ratings: {e}")
+    
+    # Record result
+    result_record = {
+        "comparison_num": current_comparison + 1,
+        "winner": winner_provider,
+        "winner_voice": winner_voice,
+        "loser": loser_provider,
+        "loser_voice": loser_voice,
+        "text": pair["text"],
+        "user_choice": choice
+    }
+    st.session_state.blind_test_2_results_history.append(result_record)
+    
+    # Move to next comparison
+    st.session_state.blind_test_2_comparison_count += 1
+    
+    # Check if we're done
+    if st.session_state.blind_test_2_comparison_count >= st.session_state.blind_test_2_max_comparisons:
+        st.session_state.show_final_results_2 = True
+        st.session_state.blind_test_2_current_pair = None
+    else:
+        # Force clear the pair to ensure fresh audio generation
+        st.session_state.blind_test_2_current_pair = None
+        # Clear any cached audio state
+        if "blind_test_2_audio_played" in st.session_state:
+            st.session_state.blind_test_2_audio_played = {"A": 0, "B": 0}
+    
+    st.rerun()
+
 def handle_vote(choice: str, pair: dict):
     """Handle a user vote from blind test and update ELO ratings
     
@@ -1526,6 +2732,143 @@ def display_interim_results():
         st.rerun()
 
 
+def display_final_results_2():
+    """Display final results after all comparisons for Blind Test 2"""
+    st.markdown("---")
+    st.header("Final Results")
+    
+    results = st.session_state.blind_test_2_results_history
+    
+    if not results:
+        st.info("No comparisons completed.")
+        if st.button("Start New Test", key="start_new_2"):
+            reset_blind_test_2()
+        return
+    
+    # Calculate comprehensive stats
+    provider_wins = {}
+    provider_losses = {}
+    
+    for r in results:
+        winner = r["winner"]
+        loser = r["loser"]
+        
+        provider_wins[winner] = provider_wins.get(winner, 0) + 1
+        provider_losses[loser] = provider_losses.get(loser, 0) + 1
+    
+    # Calculate ELO for this test session only (starting from 1000 for all)
+    # This ensures ELO reflects performance in this specific test, not cumulative history
+    test_session_elo = {}
+    for provider in set(provider_wins.keys()) | set(provider_losses.keys()):
+        test_session_elo[provider] = 1000.0  # Start all at 1000 for this test
+    
+    # Replay all comparisons to calculate ELO for this test session
+    for r in results:
+        winner = r["winner"]
+        loser = r["loser"]
+        
+        winner_rating = test_session_elo[winner]
+        loser_rating = test_session_elo[loser]
+        
+        # Calculate expected scores using EXACT standard ELO formula
+        # E_X = 1 / (1 + 10^((R_Y - R_X) / 400))
+        import math
+        expected_winner = 1 / (1 + math.pow(10, (loser_rating - winner_rating) / 400))
+        expected_loser = 1 / (1 + math.pow(10, (winner_rating - loser_rating) / 400))
+        
+        # Update ELO using EXACT formula: R'_X = R_X + K(S_X - E_X)
+        # Winner: S_X = 1, Loser: S_X = 0
+        k_factor = 32
+        test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
+        test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
+    
+    # Create leaderboard - only show the 2 competitors that were selected for this battle
+    final_competitors = st.session_state.get("blind_test_2_final_competitors", [])
+    if final_competitors:
+        # Filter to only show the 2 selected competitors
+        all_providers = set(final_competitors) & (set(provider_wins.keys()) | set(provider_losses.keys()))
+    else:
+        all_providers = set(provider_wins.keys()) | set(provider_losses.keys())
+    
+    leaderboard_data = []
+    
+    for provider in all_providers:
+        wins = provider_wins.get(provider, 0)
+        losses = provider_losses.get(provider, 0)
+        total = wins + losses
+        win_rate = (wins / total * 100) if total > 0 else 0
+        
+        # Samples should be from current test only (wins + losses), not cumulative database data
+        samples = total
+        
+        leaderboard_data.append({
+            "Rank": 0,
+            "Provider": TTS_PROVIDERS.get(provider, {}).name if provider in TTS_PROVIDERS else provider.title(),
+            "Model": get_model_name(provider),
+            "Wins": wins,
+            "Losses": losses,
+            "Win Rate": f"{win_rate:.1f}%",
+            "Samples": samples
+        })
+    
+    # Sort by Win Rate and assign ranks
+    leaderboard_data.sort(key=lambda x: float(x["Win Rate"].replace("%", "")), reverse=True)
+    for i, item in enumerate(leaderboard_data):
+        item["Rank"] = i + 1
+    
+    df = pd.DataFrame(leaderboard_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Summary metrics
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Total Comparisons", len(results))
+    
+    with col2:
+        # Show winner and competitor with win rate
+        if len(leaderboard_data) >= 2:
+            winner_data = leaderboard_data[0]  # Highest Win Rate is winner
+            competitor_data = leaderboard_data[1]  # Second place is competitor
+            
+            winner_name = winner_data["Provider"]
+            winner_win_rate = winner_data["Win Rate"]
+            competitor_name = competitor_data["Provider"]
+            competitor_win_rate = competitor_data["Win Rate"]
+            
+            st.markdown(f"**Winner:** {winner_name} ({winner_win_rate})")
+            st.markdown(f"**Competitor:** {competitor_name} ({competitor_win_rate})")
+        elif len(leaderboard_data) == 1:
+            # Only one provider (shouldn't happen in 1v1, but handle it)
+            st.markdown(f"**Winner:** {leaderboard_data[0]['Provider']}")
+            st.markdown(f"**Win Rate:** {leaderboard_data[0]['Win Rate']}")
+        else:
+            st.metric("Providers Tested", len(all_providers))
+    
+    st.divider()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Start New Test", type="primary", use_container_width=True, key="start_new_test_2"):
+            reset_blind_test_2()
+    
+    with col2:
+        if st.button("View Full Leaderboard", use_container_width=True, key="view_leaderboard_2"):
+            st.session_state.current_page = "Leaderboard"
+            st.rerun()
+
+def reset_blind_test_2():
+    """Reset all blind test 2 state"""
+    st.session_state.blind_test_2_setup_complete = False
+    st.session_state.blind_test_2_current_pair = None
+    st.session_state.blind_test_2_comparison_count = 0
+    st.session_state.blind_test_2_results_history = []
+    st.session_state.show_interim_results_2 = False
+    st.session_state.show_final_results_2 = False
+    st.session_state.blind_test_2_final_competitors = None  # Clear final competitors
+    st.rerun()
+
 def display_final_results():
     """Display final results after all comparisons"""
     st.markdown("---")
@@ -1586,9 +2929,6 @@ def display_final_results():
         total = wins + losses
         win_rate = (wins / total * 100) if total > 0 else 0
         
-        # Use ELO from this test session only (not cumulative)
-        session_elo = test_session_elo.get(provider, 1000.0)
-        
         # Samples should be from current test only (wins + losses), not cumulative database data
         samples = total
         
@@ -1596,15 +2936,14 @@ def display_final_results():
             "Rank": 0,
             "Provider": TTS_PROVIDERS.get(provider, {}).name if provider in TTS_PROVIDERS else provider.title(),
             "Model": get_model_name(provider),
-            "ELO": round(session_elo, 1),
             "Wins": wins,
             "Losses": losses,
             "Win Rate": f"{win_rate:.1f}%",
             "Samples": samples
         })
     
-    # Sort by ELO and assign ranks (ELO now reflects this test session only)
-    leaderboard_data.sort(key=lambda x: x["ELO"], reverse=True)
+    # Sort by Win Rate and assign ranks
+    leaderboard_data.sort(key=lambda x: float(x["Win Rate"].replace("%", "")), reverse=True)
     for i, item in enumerate(leaderboard_data):
         item["Rank"] = i + 1
     
@@ -1612,18 +2951,31 @@ def display_final_results():
     st.dataframe(df, use_container_width=True, hide_index=True)
     
     # Summary metrics
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         st.metric("Total Comparisons", len(results))
     
     with col2:
-        murf_wins = sum(1 for r in results if r.get("murf_won", False))
-        st.metric("Murf Wins", murf_wins)
-    
-    with col3:
-        murf_win_rate = (murf_wins / len(results) * 100) if results else 0
-        st.metric("Murf Win Rate", f"{murf_win_rate:.1f}%")
+        # Show winner and competitor with win rate
+        if len(leaderboard_data) >= 2:
+            winner_data = leaderboard_data[0]  # Highest Win Rate is winner
+            competitor_data = leaderboard_data[1]  # Second place is competitor
+            
+            winner_name = winner_data["Provider"]
+            winner_win_rate = winner_data["Win Rate"]
+            competitor_name = competitor_data["Provider"]
+            competitor_win_rate = competitor_data["Win Rate"]
+            
+            st.markdown(f"**Winner:** {winner_name} ({winner_win_rate})")
+            st.markdown(f"**Competitor:** {competitor_name} ({competitor_win_rate})")
+        elif len(leaderboard_data) == 1:
+            # Only one provider (shouldn't happen in 1v1, but handle it)
+            st.markdown(f"**Winner:** {leaderboard_data[0]['Provider']}")
+            st.markdown(f"**Win Rate:** {leaderboard_data[0]['Win Rate']}")
+        else:
+            total_providers = len(set([r["winner"] for r in results] + [r["loser"] for r in results]))
+            st.metric("Providers Tested", total_providers)
     
     st.divider()
     
@@ -1884,41 +3236,79 @@ def handle_blind_test_vote(winner_result: BenchmarkResult, loser_result: Benchma
         st.error(f"Error updating ratings: {e}")
 
 def leaderboard_page():
-    """ELO leaderboard page with persistent data - styled like Artificial Analysis"""
+    """ELO leaderboard page - shows persistent Ranked Blind Test results from database"""
     
     st.header("Leaderboard")
-    st.markdown("ELO-based rankings of TTS providers based on blind test comparisons")
+    st.markdown("ELO-based rankings from Ranked Blind Test only")
     
-    leaderboard = st.session_state.benchmark_engine.get_leaderboard()
+    # Get Ranked Blind Test votes from database (persistent storage)
+    # This reads fresh data from database every time the page loads
+    votes = db.get_ranked_blind_test_votes()
     
-    if not leaderboard:
-        st.info("No leaderboard data available. Run blind tests or benchmarks to generate rankings.")
+    if not votes:
+        st.info("No Ranked Blind Test data available. Run Ranked Blind Test to generate rankings.")
         
-        if st.button("Start Blind Test", type="primary", use_container_width=True):
-            st.session_state.current_page = "Blind Test"
+        if st.button("Start Ranked Blind Test", type="primary", use_container_width=True):
+            st.session_state.current_page = "Ranked Blind Test"
             st.rerun()
         return
     
-    from database import db
+    # Calculate stats from all Ranked Blind Test votes
+    provider_wins = {}
+    provider_losses = {}
     
-    # Prepare data for display
+    for winner, loser, timestamp, metadata in votes:
+        provider_wins[winner] = provider_wins.get(winner, 0) + 1
+        provider_losses[loser] = provider_losses.get(loser, 0) + 1
+    
+    # Calculate ELO from all Ranked Blind Test votes (starting from 1000 for all)
+    test_session_elo = {}
+    all_providers = set(provider_wins.keys()) | set(provider_losses.keys())
+    for provider in all_providers:
+        test_session_elo[provider] = 1000.0  # Start all at 1000
+    
+    # Replay all votes to calculate cumulative ELO
+    for winner, loser, timestamp, metadata in votes:
+        winner_rating = test_session_elo.get(winner, 1000.0)
+        loser_rating = test_session_elo.get(loser, 1000.0)
+        
+        # Calculate expected scores using ELO formula
+        import math
+        expected_winner = 1 / (1 + math.pow(10, (loser_rating - winner_rating) / 400))
+        expected_loser = 1 / (1 + math.pow(10, (winner_rating - loser_rating) / 400))
+        
+        # Update ELO
+        k_factor = 32
+        test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
+        test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
+    
+    # Prepare data for display - from all Ranked Blind Test sessions (persistent)
     display_data = []
-    for item in leaderboard:
-        provider = item["provider"]
+    for provider in all_providers:
+        wins = provider_wins.get(provider, 0)
+        losses = provider_losses.get(provider, 0)
+        total = wins + losses
+        win_rate = (wins / total * 100) if total > 0 else 0
+        
         provider_config = TTS_PROVIDERS.get(provider)
         provider_name = provider_config.name if provider_config else provider.title()
         model_name = get_model_name(provider)
         
         display_data.append({
-            "Rank": f"#{item['rank']}",
+            "Rank": 0,  # Will be assigned after sorting
             "Provider": provider_name,
             "Model": model_name,
-            "ELO": round(item["elo_rating"]),
-            "Samples": item["games_played"],
-            "Wins": item["wins"],
-            "Losses": item["losses"],
-            "Win Rate": f"{item['win_rate']:.1f}%"
+            "ELO": round(test_session_elo[provider]),
+            "Samples": total,
+            "Wins": wins,
+            "Losses": losses,
+            "Win Rate": f"{win_rate:.1f}%"
         })
+    
+    # Sort by ELO and assign ranks
+    display_data.sort(key=lambda x: x["ELO"], reverse=True)
+    for i, item in enumerate(display_data):
+        item["Rank"] = f"#{i + 1}"
     
     # Create DataFrame
     df = pd.DataFrame(display_data)

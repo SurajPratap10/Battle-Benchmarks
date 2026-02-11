@@ -245,17 +245,17 @@ TTS_PROVIDERS = {
         name="Deepgram Aura 2",
         api_key_env="DEEPGRAM_API_KEY",
         base_url="https://api.deepgram.com/v1/speak",
-        supported_voices=["aura-2-asteria-en", "aura-2-luna-en", "aura-2-stella-en", "aura-2-athena-en", "aura-2-hera-en", "aura-2-orion-en"],
+        supported_voices=["aura-2-asteria-en", "aura-2-luna-en", "aura-2-athena-en", "aura-2-hera-en", "aura-2-orion-en", "aura-2-apollo-en"],
         max_chars=2000,
         supports_streaming=True,
         model_name="aura-2",
         voice_info={
             "aura-2-asteria-en": VoiceInfo("aura-2-asteria-en", "Asteria", "female", "US"),
             "aura-2-luna-en": VoiceInfo("aura-2-luna-en", "Luna", "female", "US"),
-            "aura-2-stella-en": VoiceInfo("aura-2-stella-en", "Stella", "female", "US"),
             "aura-2-athena-en": VoiceInfo("aura-2-athena-en", "Athena", "female", "US"),
             "aura-2-hera-en": VoiceInfo("aura-2-hera-en", "Hera", "female", "US"),
             "aura-2-orion-en": VoiceInfo("aura-2-orion-en", "Orion", "male", "US"),
+            "aura-2-apollo-en": VoiceInfo("aura-2-apollo-en", "Apollo", "male", "US"),
         }
     ),
     "elevenlabs_flash": TTSConfig(
@@ -323,7 +323,7 @@ TTS_PROVIDERS = {
         model_name="Cartesia Sonic 2.0",
         voice_info={
             "British Lady": VoiceInfo("British Lady", "British Lady", "female", "UK"),
-            "Conversational Lady": VoiceInfo("Conversational Lady", "Conversational Lady", "female", "US"),
+            "Conversational Lady": VoiceInfo("Conversational Lady", "Conversational Lady", "male", "US"),
             "Classy British Man": VoiceInfo("Classy British Man", "Classy British Man", "male", "UK"),
             "Friendly Reading Man": VoiceInfo("Friendly Reading Man", "Friendly Reading Man", "male", "US"),
             "Midwestern Woman": VoiceInfo("Midwestern Woman", "Midwestern Woman", "female", "US"),
@@ -340,7 +340,7 @@ TTS_PROVIDERS = {
         model_name="Cartesia Sonic Turbo",
         voice_info={
             "British Lady": VoiceInfo("British Lady", "British Lady", "female", "UK"),
-            "Conversational Lady": VoiceInfo("Conversational Lady", "Conversational Lady", "female", "US"),
+            "Conversational Lady": VoiceInfo("Conversational Lady", "Conversational Lady", "male", "US"),
             "Classy British Man": VoiceInfo("Classy British Man", "Classy British Man", "male", "UK"),
             "Friendly Reading Man": VoiceInfo("Friendly Reading Man", "Friendly Reading Man", "male", "US"),
             "Midwestern Woman": VoiceInfo("Midwestern Woman", "Midwestern Woman", "female", "US"),
@@ -357,7 +357,7 @@ TTS_PROVIDERS = {
         model_name="Cartesia Sonic 3.0",
         voice_info={
             "British Lady": VoiceInfo("British Lady", "British Lady", "female", "UK"),
-            "Conversational Lady": VoiceInfo("Conversational Lady", "Conversational Lady", "female", "US"),
+            "Conversational Lady": VoiceInfo("Conversational Lady", "Conversational Lady", "male", "US"),
             "Classy British Man": VoiceInfo("Classy British Man", "Classy British Man", "male", "UK"),
             "Friendly Reading Man": VoiceInfo("Friendly Reading Man", "Friendly Reading Man", "male", "US"),
             "Midwestern Woman": VoiceInfo("Midwestern Woman", "Midwestern Woman", "female", "US"),
@@ -372,6 +372,21 @@ TTS_PROVIDERS = {
         max_chars=5000,
         supports_streaming=False,
         model_name="bulbul:v2",
+        voice_info={
+            "en-IN-male": VoiceInfo("en-IN-male", "Male (Indian English)", "male", "US"),
+            "en-IN-female": VoiceInfo("en-IN-female", "Female (Indian English)", "female", "US"),
+            "hi-IN-male": VoiceInfo("hi-IN-male", "Male (Hindi)", "male", "US"),
+            "hi-IN-female": VoiceInfo("hi-IN-female", "Female (Hindi)", "female", "US"),
+        }
+    ),
+    "sarvam_bulbul_v3": TTSConfig(
+        name="Sarvam AI Bulbul v3",
+        api_key_env="SARVAM_API_KEY",
+        base_url="https://api.sarvam.ai/text-to-speech",
+        supported_voices=["en-IN-male", "en-IN-female", "hi-IN-male", "hi-IN-female"],
+        max_chars=5000,
+        supports_streaming=False,
+        model_name="bulbul:v3",
         voice_info={
             "en-IN-male": VoiceInfo("en-IN-male", "Male (Indian English)", "male", "US"),
             "en-IN-female": VoiceInfo("en-IN-female", "Female (Indian English)", "female", "US"),
