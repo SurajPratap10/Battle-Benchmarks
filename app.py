@@ -2861,22 +2861,25 @@ def display_final_results_2():
         st.metric("Total Comparisons", len(results))
     
     with col2:
-        # Show winner and competitor with win rate
-        if len(leaderboard_data) >= 2:
-            winner_data = leaderboard_data[0]  # Highest Win Rate is winner
-            competitor_data = leaderboard_data[1]  # Second place is competitor
-            
+        # Show all competitors with their rankings
+        if len(leaderboard_data) >= 1:
+            # Show winner first
+            winner_data = leaderboard_data[0]
             winner_name = winner_data["Provider"]
             winner_win_rate = winner_data["Win Rate"]
-            competitor_name = competitor_data["Provider"]
-            competitor_win_rate = competitor_data["Win Rate"]
-            
             st.markdown(f"**Winner:** {winner_name} ({winner_win_rate})")
-            st.markdown(f"**Competitor:** {competitor_name} ({competitor_win_rate})")
-        elif len(leaderboard_data) == 1:
-            # Only one provider (shouldn't happen in 1v1, but handle it)
-            st.markdown(f"**Winner:** {leaderboard_data[0]['Provider']}")
-            st.markdown(f"**Win Rate:** {leaderboard_data[0]['Win Rate']}")
+            
+            # Show all other competitors
+            if len(leaderboard_data) > 1:
+                competitors_list = []
+                for comp_data in leaderboard_data[1:]:
+                    comp_name = comp_data["Provider"]
+                    comp_win_rate = comp_data["Win Rate"]
+                    comp_rank = comp_data["Rank"]
+                    competitors_list.append(f"{comp_rank}. {comp_name} ({comp_win_rate})")
+                
+                competitors_text = "<br>".join(competitors_list)
+                st.markdown(f"**All Competitors:**<br>{competitors_text}", unsafe_allow_html=True)
         else:
             st.metric("Providers Tested", len(all_providers))
     
