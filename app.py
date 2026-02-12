@@ -573,6 +573,10 @@ def blind_test_2_page():
         st.session_state.blind_test_2_audio_played = {"A": 0, "B": 0}
     if "show_final_results_2" not in st.session_state:
         st.session_state.show_final_results_2 = False
+    if "blind_test_2_comparison_pairs" not in st.session_state:
+        st.session_state.blind_test_2_comparison_pairs = None
+    if "blind_test_2_pair_index" not in st.session_state:
+        st.session_state.blind_test_2_pair_index = 0
     
     # If final results should be shown, display them directly
     if st.session_state.get("show_final_results_2", False):
@@ -631,7 +635,7 @@ def display_blind_test_2_setup(configured_providers: List[str]):
             
             # Use multiselect to allow selecting up to 5 competitors
             selected_competitor_displays = st.multiselect(
-                "Select competitors (up to 5, we will randomly choose 2 for each comparison):",
+                "Select competitors (2-5 models, all will be used in pairwise comparisons):",
                 competitor_options,
                 default=[competitor_options[i] for i in current_selected_indices if i < len(competitor_options)],
                 max_selections=5,
@@ -648,7 +652,8 @@ def display_blind_test_2_setup(configured_providers: List[str]):
             
             # Show info about selected competitors
             if selected_competitor_ids:
-                st.caption(f"✅ {len(selected_competitor_ids)} competitor(s) selected. System will randomly pick 2 for each comparison.")
+                num_pairs = len(selected_competitor_ids) * (len(selected_competitor_ids) - 1) // 2
+                st.caption(f"✅ {len(selected_competitor_ids)} competitor(s) selected. Will generate {num_pairs} unique pairwise comparisons.")
             else:
                 st.caption("Select at least 2 competitors to start")
         else:
@@ -729,22 +734,28 @@ Hello, how can I assist you today with your account inquiry?""",
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         if st.button("Start Voice Battle", type="primary", disabled=not can_start, key="start_battle_2"):
-            # Randomly select 2 competitors from selected pool ONCE at start
+            # Use ALL selected competitors (not just 2)
             selected_pool = st.session_state.blind_test_2_selected_competitors
             if len(selected_pool) >= 2:
+                import itertools
                 import random
-                # Randomly pick 2 competitors for the entire battle
-                if len(selected_pool) == 2:
-                    final_competitors = selected_pool
-                else:
-                    final_competitors = random.sample(selected_pool, 2)
                 
-                # Store the final 2 competitors for all comparisons
-                st.session_state.blind_test_2_final_competitors = final_competitors
+                # Store ALL selected competitors (not just 2)
+                st.session_state.blind_test_2_final_competitors = selected_pool
                 
-                # Show which 2 were selected
-                comp_names = [TTS_PROVIDERS[c].name for c in final_competitors]
-                st.info(f"🎯 Selected for battle: {comp_names[0]} vs {comp_names[1]}")
+                # Generate all pairwise combinations
+                all_pairs = list(itertools.combinations(selected_pool, 2))
+                # Shuffle the pairs for variety
+                random.shuffle(all_pairs)
+                
+                # Store the pairs list for cycling through
+                st.session_state.blind_test_2_comparison_pairs = all_pairs
+                st.session_state.blind_test_2_pair_index = 0
+                
+                # Show which models were selected
+                comp_names = [TTS_PROVIDERS[c].name for c in selected_pool]
+                num_pairs = len(all_pairs)
+                st.info(f"🎯 {len(selected_pool)} models selected: {', '.join(comp_names)}. Will test {num_pairs} pairwise comparisons.")
             
             st.session_state.blind_test_2_setup_complete = True
             st.session_state.blind_test_2_comparison_count = 0
@@ -1323,15 +1334,27 @@ def generate_next_comparison_2():
     print(f"[CRITICAL DEBUG] Selected sentence #{len(st.session_state.used_sentences_2)}: '{text[:80]}...'")
     print(f"[CRITICAL DEBUG] Available sentences: {len(available_sentences)}, Total: {len(sentences)}")
     
-    # Get the final 2 competitors selected at start (locked in for all comparisons)
-    final_competitors = st.session_state.get("blind_test_2_final_competitors")
-    if not final_competitors or len(final_competitors) != 2:
-        st.error("Final competitors not selected. Please restart the test.")
+    # Get the pre-generated comparison pairs
+    comparison_pairs = st.session_state.get("blind_test_2_comparison_pairs")
+    pair_index = st.session_state.get("blind_test_2_pair_index", 0)
+    
+    if not comparison_pairs or len(comparison_pairs) == 0:
+        st.error("Comparison pairs not generated. Please restart the test.")
         return
     
-    competitor_a_id, competitor_b_id = final_competitors[0], final_competitors[1]
+    # Cycle through pairs - if we've used all pairs, shuffle and restart
+    if pair_index >= len(comparison_pairs):
+        random.shuffle(comparison_pairs)
+        pair_index = 0
+        st.session_state.blind_test_2_pair_index = 0
     
-    print(f"[COMPETITOR SELECTION] Using locked competitors: {competitor_a_id} vs {competitor_b_id} (Comparison #{comparison_index + 1})")
+    # Get the current pair
+    competitor_a_id, competitor_b_id = comparison_pairs[pair_index]
+    
+    # Update pair index for next comparison
+    st.session_state.blind_test_2_pair_index = pair_index + 1
+    
+    print(f"[COMPETITOR SELECTION] Using pair {pair_index + 1}/{len(comparison_pairs)}: {competitor_a_id} vs {competitor_b_id} (Comparison #{comparison_index + 1})")
     
     # Get voices for competitor A matching gender
     competitor_a_voices = get_voices_by_gender(competitor_a_id, gender_filter)
@@ -2758,15 +2781,27 @@ def display_final_results_2():
     
     # Calculate ELO for this test session only (starting from 1000 for all)
     # This ensures ELO reflects performance in this specific test, not cumulative history
+    # Initialize ELO for all selected competitors
+    final_competitors = st.session_state.get("blind_test_2_final_competitors", [])
     test_session_elo = {}
-    for provider in set(provider_wins.keys()) | set(provider_losses.keys()):
-        test_session_elo[provider] = 1000.0  # Start all at 1000 for this test
+    if final_competitors:
+        # Initialize all selected competitors
+        for provider in final_competitors:
+            test_session_elo[provider] = 1000.0  # Start all at 1000 for this test
+    else:
+        # Fallback: initialize providers that have wins or losses
+        for provider in set(provider_wins.keys()) | set(provider_losses.keys()):
+            test_session_elo[provider] = 1000.0  # Start all at 1000 for this test
     
     # Replay all comparisons to calculate ELO for this test session
     for r in results:
         winner = r["winner"]
         loser = r["loser"]
         
+        # Skip if winner/loser not in ELO (shouldn't happen, but safety check)
+        if winner not in test_session_elo or loser not in test_session_elo:
+            continue
+            
         winner_rating = test_session_elo[winner]
         loser_rating = test_session_elo[loser]
         
@@ -2782,12 +2817,12 @@ def display_final_results_2():
         test_session_elo[winner] = winner_rating + k_factor * (1 - expected_winner)
         test_session_elo[loser] = loser_rating + k_factor * (0 - expected_loser)
     
-    # Create leaderboard - only show the 2 competitors that were selected for this battle
-    final_competitors = st.session_state.get("blind_test_2_final_competitors", [])
+    # Create leaderboard - show ALL competitors that were selected for this battle
     if final_competitors:
-        # Filter to only show the 2 selected competitors
-        all_providers = set(final_competitors) & (set(provider_wins.keys()) | set(provider_losses.keys()))
+        # Show all selected competitors (even if they have 0 wins/losses)
+        all_providers = set(final_competitors)
     else:
+        # Fallback: show providers that have wins or losses
         all_providers = set(provider_wins.keys()) | set(provider_losses.keys())
     
     leaderboard_data = []
@@ -2867,6 +2902,8 @@ def reset_blind_test_2():
     st.session_state.show_interim_results_2 = False
     st.session_state.show_final_results_2 = False
     st.session_state.blind_test_2_final_competitors = None  # Clear final competitors
+    st.session_state.blind_test_2_comparison_pairs = None  # Clear comparison pairs
+    st.session_state.blind_test_2_pair_index = 0  # Reset pair index
     st.rerun()
 
 def display_final_results():
