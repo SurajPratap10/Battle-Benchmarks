@@ -577,6 +577,8 @@ def blind_test_2_page():
         st.session_state.blind_test_2_comparison_pairs = None
     if "blind_test_2_pair_index" not in st.session_state:
         st.session_state.blind_test_2_pair_index = 0
+    if "blind_test_2_locale_filter" not in st.session_state:
+        st.session_state.blind_test_2_locale_filter = "US"
     
     # If final results should be shown, display them directly
     if st.session_state.get("show_final_results_2", False):
@@ -686,6 +688,24 @@ def display_blind_test_2_setup(configured_providers: List[str]):
         )
         st.session_state.blind_test_2_gender_filter = selected_gender.lower()
         st.caption(f"All comparisons will use {selected_gender.lower()} voices")
+        
+        # Locale selection - only US English
+        st.markdown("**4. Select Voice Locale/Language**")
+        if "blind_test_2_locale_filter" not in st.session_state:
+            st.session_state.blind_test_2_locale_filter = "US"  # Default to US English
+        
+        # Only US English available - dropdown with single option
+        locale_options = ["US English (en-US)"]
+        locale_values = ["US"]
+        
+        selected_locale_display = st.selectbox(
+            "Choose locale/language for all comparisons:",
+            locale_options,
+            index=0,
+            key="locale_select_setup_2"
+        )
+        st.session_state.blind_test_2_locale_filter = "US"
+        st.caption(f"All comparisons will use {selected_locale_display} voices")
     
     st.divider()
     
@@ -1356,8 +1376,12 @@ def generate_next_comparison_2():
     
     print(f"[COMPETITOR SELECTION] Using pair {pair_index + 1}/{len(comparison_pairs)}: {competitor_a_id} vs {competitor_b_id} (Comparison #{comparison_index + 1})")
     
-    # Get voices for competitor A matching gender
-    competitor_a_voices = get_voices_by_gender(competitor_a_id, gender_filter)
+    # Get locale filter from setup
+    locale_filter = st.session_state.get("blind_test_2_locale_filter", "US")
+    
+    # Get voices for competitor A matching gender AND locale
+    from config import get_voices_by_gender_and_locale, get_voices_by_gender
+    competitor_a_voices = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
     if competitor_a_id in TTS_PROVIDERS:
         supported_voices_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
         competitor_a_voices = [v for v in competitor_a_voices if v in supported_voices_set]
@@ -1367,11 +1391,11 @@ def generate_next_comparison_2():
         try:
             provider_obj = TTSProviderFactory.create_provider(competitor_a_id)
             if hasattr(provider_obj, 'voice_id_map'):
-                # Get completely fresh gender-filtered list
-                fresh_a = get_voices_by_gender(competitor_a_id, gender_filter)
+                # Get completely fresh gender+locale-filtered list
+                fresh_a = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
                 if competitor_a_id in TTS_PROVIDERS:
                     supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
-                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender, 4) correct locale
                     competitor_a_voices = [
                         v for v in fresh_a 
                         if v in supported_set and 
@@ -1379,7 +1403,12 @@ def generate_next_comparison_2():
                         TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and
                         TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
                     ]
-                    print(f"[CARTESIA PRE-FILTER] Competitor A: Filtered to {len(competitor_a_voices)} {gender_filter} voices")
+                    # Additional locale check
+                    competitor_a_voices = [
+                        v for v in competitor_a_voices
+                        if locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)
+                    ]
+                    print(f"[CARTESIA PRE-FILTER] Competitor A: Filtered to {len(competitor_a_voices)} {gender_filter} {locale_filter} voices")
         except Exception as e:
             print(f"Warning: Could not pre-filter Cartesia voices for A: {e}")
     
@@ -1389,16 +1418,19 @@ def generate_next_comparison_2():
         supported_voices_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
         competitor_a_voices = [
             v for v, info in competitor_a_voice_info.items() 
-            if info.gender == gender_filter and v in supported_voices_set
+            if info.gender == gender_filter and 
+            v in supported_voices_set and
+            locale_filter == "US" and (info.accent == "US" or "en-US" in v)
         ]
     
     if not competitor_a_voices:
-        st.error(f"Competitor {TTS_PROVIDERS[competitor_a_id].name} doesn't have any {gender_filter} voices available.")
+        locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
+        st.error(f"Competitor {TTS_PROVIDERS[competitor_a_id].name} doesn't have any {gender_filter} {locale_display} voices available.")
         st.session_state.blind_test_2_current_pair = None
         return
     
-    # Get voices for competitor B matching gender
-    competitor_b_voices = get_voices_by_gender(competitor_b_id, gender_filter)
+    # Get voices for competitor B matching gender AND locale
+    competitor_b_voices = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
     if competitor_b_id in TTS_PROVIDERS:
         supported_voices_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
         competitor_b_voices = [v for v in competitor_b_voices if v in supported_voices_set]
@@ -1408,11 +1440,11 @@ def generate_next_comparison_2():
         try:
             provider_obj = TTSProviderFactory.create_provider(competitor_b_id)
             if hasattr(provider_obj, 'voice_id_map'):
-                # Get completely fresh gender-filtered list
-                fresh_b = get_voices_by_gender(competitor_b_id, gender_filter)
+                # Get completely fresh gender+locale-filtered list
+                fresh_b = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
                 if competitor_b_id in TTS_PROVIDERS:
                     supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
-                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender, 4) correct locale
                     competitor_b_voices = [
                         v for v in fresh_b 
                         if v in supported_set and 
@@ -1420,7 +1452,14 @@ def generate_next_comparison_2():
                         TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and
                         TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
                     ]
-                    print(f"[CARTESIA PRE-FILTER] Competitor B: Filtered to {len(competitor_b_voices)} {gender_filter} voices")
+                    # Additional locale check
+                    competitor_b_voices = [
+                        v for v in competitor_b_voices
+                        if (locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)) or
+                           (locale_filter == "IN" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
+                           (locale_filter == "HI" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "HI" or "hi-IN" in v))
+                    ]
+                    print(f"[CARTESIA PRE-FILTER] Competitor B: Filtered to {len(competitor_b_voices)} {gender_filter} {locale_filter} voices")
         except Exception as e:
             print(f"Warning: Could not pre-filter Cartesia voices for B: {e}")
     
@@ -1430,47 +1469,63 @@ def generate_next_comparison_2():
         supported_voices_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
         competitor_b_voices = [
             v for v, info in competitor_b_voice_info.items() 
-            if info.gender == gender_filter and v in supported_voices_set
+            if info.gender == gender_filter and 
+            v in supported_voices_set and
+            locale_filter == "US" and (info.accent == "US" or "en-US" in v)
         ]
     
     if not competitor_b_voices:
-        st.error(f"Competitor {TTS_PROVIDERS[competitor_b_id].name} doesn't have any {gender_filter} voices available.")
+        locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
+        st.error(f"Competitor {TTS_PROVIDERS[competitor_b_id].name} doesn't have any {gender_filter} {locale_display} voices available.")
         st.session_state.blind_test_2_current_pair = None
         return
     
-    # CRITICAL: Re-verify voice lists contain ONLY correct gender voices before selection
+    # CRITICAL: Re-verify voice lists contain ONLY correct gender AND locale voices before selection
     # This is especially important for Cartesia
     competitor_a_voices = [v for v in competitor_a_voices 
                           if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
-                          TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter]
+                          TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter and
+                          locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)
+                          ]
     competitor_b_voices = [v for v in competitor_b_voices 
                           if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
-                          TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter]
+                          TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter and
+                          locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)
+                          ]
     
     if not competitor_a_voices:
-        st.error(f"CRITICAL: Competitor A ({TTS_PROVIDERS[competitor_a_id].name}) has no {gender_filter} voices after filtering")
+        locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
+        st.error(f"CRITICAL: Competitor A ({TTS_PROVIDERS[competitor_a_id].name}) has no {gender_filter} {locale_display} voices after filtering")
         st.session_state.blind_test_2_current_pair = None
         return
     
     if not competitor_b_voices:
-        st.error(f"CRITICAL: Competitor B ({TTS_PROVIDERS[competitor_b_id].name}) has no {gender_filter} voices after filtering")
+        locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
+        st.error(f"CRITICAL: Competitor B ({TTS_PROVIDERS[competitor_b_id].name}) has no {gender_filter} {locale_display} voices after filtering")
         st.session_state.blind_test_2_current_pair = None
         return
     
-    # CRITICAL: One final filter to ensure ONLY correct gender voices remain
+    # CRITICAL: One final filter to ensure ONLY correct gender AND locale voices remain
     competitor_a_voices = [
         v for v in competitor_a_voices 
         if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
-        TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
+        TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter and
+        ((locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)) or
+         (locale_filter == "IN" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
+         (locale_filter == "HI" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "HI" or "hi-IN" in v)))
     ]
     competitor_b_voices = [
         v for v in competitor_b_voices 
         if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
-        TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
+        TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter and
+        ((locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)) or
+         (locale_filter == "IN" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
+         (locale_filter == "HI" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "HI" or "hi-IN" in v)))
     ]
     
     if not competitor_a_voices or not competitor_b_voices:
-        st.error(f"CRITICAL: No {gender_filter} voices available after final filtering")
+        locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
+        st.error(f"CRITICAL: No {gender_filter} {locale_display} voices available after final filtering")
         st.session_state.blind_test_2_current_pair = None
         return
     
@@ -1529,8 +1584,8 @@ def generate_next_comparison_2():
     # CRITICAL: If wrong gender detected, this should NEVER happen after filtering, but verify anyway
     if not competitor_a_voice_info or competitor_a_voice_info.gender != gender_filter:
         print(f"[CRITICAL ERROR] Competitor A voice {competitor_a_voice} is {competitor_a_voice_info.gender if competitor_a_voice_info else 'unknown'}, expected {gender_filter}")
-        # Get completely fresh list
-        fresh_a = get_voices_by_gender(competitor_a_id, gender_filter)
+        # Get completely fresh list with locale filter
+        fresh_a = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
         if competitor_a_id in TTS_PROVIDERS:
             supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
             fresh_a = [v for v in fresh_a if v in supported_set]
@@ -1545,8 +1600,8 @@ def generate_next_comparison_2():
     
     if not competitor_b_voice_info or competitor_b_voice_info.gender != gender_filter:
         print(f"[CRITICAL ERROR] Competitor B voice {competitor_b_voice} is {competitor_b_voice_info.gender if competitor_b_voice_info else 'unknown'}, expected {gender_filter}")
-        # Get completely fresh list
-        fresh_b = get_voices_by_gender(competitor_b_id, gender_filter)
+        # Get completely fresh list with locale filter
+        fresh_b = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
         if competitor_b_id in TTS_PROVIDERS:
             supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
             fresh_b = [v for v in fresh_b if v in supported_set]
@@ -1604,16 +1659,17 @@ def generate_next_comparison_2():
                     gender_matches = voice_info_check and voice_info_check.gender == gender_filter
                     
                     # ALWAYS get completely fresh list for Cartesia - don't trust any previous lists
-                    fresh_cartesia_voices = get_voices_by_gender(comp_id, gender_filter)
+                    fresh_cartesia_voices = get_voices_by_gender_and_locale(comp_id, gender_filter, locale_filter)
                     if comp_id in TTS_PROVIDERS:
                         supported_set = set(TTS_PROVIDERS[comp_id].supported_voices)
-                        # Filter to only voices that are in voice_id_map AND supported AND match gender
+                        # Filter to only voices that are in voice_id_map AND supported AND match gender AND locale
                         fresh_cartesia_voices = [
                             v for v in fresh_cartesia_voices 
                             if v in supported_set and 
                             v in provider_obj.voice_id_map and
                             TTS_PROVIDERS[comp_id].voice_info.get(v) and
-                            TTS_PROVIDERS[comp_id].voice_info[v].gender == gender_filter
+                            TTS_PROVIDERS[comp_id].voice_info[v].gender == gender_filter and
+                            locale_filter == "US" and (TTS_PROVIDERS[comp_id].voice_info[v].accent == "US" or "en-US" in v)
                         ]
                     
                     # If current voice is not in fresh list or doesn't match, replace it
@@ -2907,6 +2963,7 @@ def reset_blind_test_2():
     st.session_state.blind_test_2_final_competitors = None  # Clear final competitors
     st.session_state.blind_test_2_comparison_pairs = None  # Clear comparison pairs
     st.session_state.blind_test_2_pair_index = 0  # Reset pair index
+    st.session_state.blind_test_2_locale_filter = "US"  # Reset to default locale
     st.rerun()
 
 def display_final_results():

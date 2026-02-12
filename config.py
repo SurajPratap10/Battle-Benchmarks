@@ -417,6 +417,28 @@ def get_voices_by_gender(provider_id: str, gender: str) -> List[str]:
         return voices
     return []
 
+def get_voices_by_gender_and_locale(provider_id: str, gender: str, locale: str = None) -> List[str]:
+    """Get voices filtered by gender and locale/language for a provider
+    
+    Locale options:
+    - "US" for US English (en-US)
+    """
+    if provider_id in TTS_PROVIDERS:
+        voices = []
+        supported_voices_set = set(TTS_PROVIDERS[provider_id].supported_voices)
+        for voice_id, info in TTS_PROVIDERS[provider_id].voice_info.items():
+            # Only include voices that match gender AND are in supported_voices
+            if info.gender == gender and voice_id in supported_voices_set:
+                if locale is None:
+                    # No locale filter - include all
+                    voices.append(voice_id)
+                elif locale == "US":
+                    # US English - check accent field or voice ID pattern
+                    if info.accent == "US" or "en-US" in voice_id or "en-US" in voice_id.lower():
+                        voices.append(voice_id)
+        return voices
+    return []
+
 # Benchmarking Configuration
 BENCHMARK_CONFIG = {
     "default_iterations": 3,
