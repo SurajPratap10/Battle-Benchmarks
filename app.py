@@ -3190,7 +3190,7 @@ def display_fvs_final_results():
             "Winner Voice": result["winner_voice"],
             "Loser": "Murf Falcon" if result["loser"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Loser Voice": result["loser_voice"],
-            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"],
+            "Text": result["text"],
             "Comment": result.get('comment', '') if result.get('comment') else '-'
         })
     
@@ -3674,7 +3674,7 @@ def display_final_results_2():
             "Winner Voice": result["winner_voice"],
             "Loser": get_provider_display_name(result["loser"]),
             "Loser Voice": result["loser_voice"],
-            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"],
+            "Text": result["text"],
             "Comment": result.get('comment', '') if result.get('comment') else '-'
         })
     
@@ -3828,7 +3828,7 @@ def display_final_results():
             "Winner Voice": result["winner_voice"],
             "Loser": get_provider_display_name(result["loser"]),
             "Loser Voice": result["loser_voice"],
-            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"],
+            "Text": result["text"],
             "Comment": result.get('comment', '') if result.get('comment') else '-'
         })
     
