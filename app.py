@@ -1215,6 +1215,20 @@ def display_blind_test_2_comparison():
     
     st.divider()
     
+    # Comment input field (optional)
+    comment_key = f"comment_2_{st.session_state.blind_test_2_comparison_count}"
+    if comment_key not in st.session_state:
+        st.session_state[comment_key] = ""
+    
+    comment = st.text_area(
+        "Add a comment (optional)",
+        value=st.session_state.get(comment_key, ""),
+        key=comment_key,
+        placeholder="e.g., Pronunciation issue on 'A', unnatural pause, quality difference...",
+        height=80,
+        help="Add notes about this comparison to help identify actionable feedback"
+    )
+    
     # Action button - End Test only (centered, medium size)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -1344,6 +1358,20 @@ def display_blind_test_comparison():
                 handle_vote("B", pair)
     
     st.divider()
+    
+    # Comment input field (optional)
+    comment_key = f"comment_{st.session_state.blind_test_comparison_count}"
+    if comment_key not in st.session_state:
+        st.session_state[comment_key] = ""
+    
+    comment = st.text_area(
+        "Add a comment (optional)",
+        value=st.session_state.get(comment_key, ""),
+        key=comment_key,
+        placeholder="e.g., Pronunciation issue on 'X', unnatural pause, quality difference...",
+        height=80,
+        help="Add notes about this comparison to help identify actionable feedback"
+    )
     
     # Action button - End Test only (centered, medium size)
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -2907,10 +2935,24 @@ def display_fvs_comparison():
     
     st.divider()
     
+    # Comment input field (optional)
+    comment_key = f"comment_fvs_{st.session_state.fvs_comparison_count}"
+    if comment_key not in st.session_state:
+        st.session_state[comment_key] = ""
+    
+    comment = st.text_area(
+        "Add a comment (optional)",
+        value=st.session_state.get(comment_key, ""),
+        key=comment_key,
+        placeholder="e.g., Pronunciation issue on 'X', unnatural pause, quality difference...",
+        height=80,
+        help="Add notes about this comparison to help identify actionable feedback"
+    )
+    
     # Action button - End Test only (centered, medium size)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("End Test", key="fvs_end_test", use_container_width=True):
+        if st.button("End Test", key="fvs_end_test", use_container_width=True, type="secondary"):
             st.session_state.fvs_show_final_results = True
             st.rerun()
 
@@ -3046,6 +3088,44 @@ def handle_fvs_vote(choice: str, pair: dict):
     
     print(f"FVS Vote: {choice} | Winner: {winner_provider} | Loser: {loser_provider}")
     
+    # Get comment for this comparison
+    comment_key = f"comment_fvs_{current_comparison}"
+    comment = st.session_state.get(comment_key, "")
+    
+    # Extract API configuration from samples
+    sample_a = pair.get("sample_a")
+    sample_b = pair.get("sample_b")
+    
+    # Get API configs from metadata - map to provider_a and provider_b
+    config_provider_a = {}
+    config_provider_b = {}
+    
+    if sample_a and hasattr(sample_a, 'metadata') and sample_a.metadata:
+        config_provider_a = {
+            "provider": pair.get("provider_a", ""),
+            "voice": pair.get("voice_a", ""),
+            "model": sample_a.metadata.get("model", ""),
+            "format": sample_a.metadata.get("format", ""),
+            "sample_rate": sample_a.metadata.get("sample_rate", "")
+        }
+    
+    if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+        config_provider_b = {
+            "provider": pair.get("provider_b", ""),
+            "voice": pair.get("voice_b", ""),
+            "model": sample_b.metadata.get("model", ""),
+            "format": sample_b.metadata.get("format", ""),
+            "sample_rate": sample_b.metadata.get("sample_rate", "")
+        }
+    
+    # Determine winner and loser configs based on choice
+    if choice == "A":
+        winner_config = config_provider_a
+        loser_config = config_provider_b
+    else:
+        winner_config = config_provider_b
+        loser_config = config_provider_a
+    
     # Record result (NO ELO UPDATE - this is the key difference)
     result_record = {
         "comparison_num": current_comparison + 1,
@@ -3055,9 +3135,16 @@ def handle_fvs_vote(choice: str, pair: dict):
         "loser_voice": loser_voice,
         "text": pair["text"],
         "falcon_won": (pair["falcon_is"] == choice),
-        "user_choice": choice
+        "user_choice": choice,
+        "comment": comment,
+        "winner_config": winner_config,
+        "loser_config": loser_config
     }
     st.session_state.fvs_results_history.append(result_record)
+    
+    # Clear comment from session state after saving
+    if comment_key in st.session_state:
+        del st.session_state[comment_key]
     
     # Move to next comparison
     st.session_state.fvs_comparison_count += 1
@@ -3093,7 +3180,7 @@ def display_fvs_final_results():
     with col2:
         st.metric("Murf Zeroshot Wins", zeroshot_wins, f"{zeroshot_wins/total*100:.1f}%")
     
-    # Results table
+    # Results table with comments
     st.subheader("All Comparisons")
     comparison_data = []
     for result in results:
@@ -3103,11 +3190,14 @@ def display_fvs_final_results():
             "Winner Voice": result["winner_voice"],
             "Loser": "Murf Falcon" if result["loser"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Loser Voice": result["loser_voice"],
-            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"]
+            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"],
+            "Comment": result.get('comment', '') if result.get('comment') else '-'
         })
     
     df = pd.DataFrame(comparison_data)
     st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    st.divider()
     
     if st.button("Start New Test", type="primary", key="fvs_new_test"):
         # Reset all state
@@ -3177,7 +3267,45 @@ def handle_vote_2(choice: str, pair: dict):
     except Exception as e:
         print(f"Error updating ratings: {e}")
     
-    # Record result
+    # Get comment for this comparison
+    comment_key = f"comment_2_{current_comparison}"
+    comment = st.session_state.get(comment_key, "")
+    
+    # Extract API configuration from samples
+    sample_a = pair.get("sample_a")
+    sample_b = pair.get("sample_b")
+    
+    # Get API configs from metadata - map to provider_a and provider_b
+    config_provider_a = {}
+    config_provider_b = {}
+    
+    if sample_a and hasattr(sample_a, 'metadata') and sample_a.metadata:
+        config_provider_a = {
+            "provider": pair.get("provider_a", ""),
+            "voice": pair.get("voice_a", ""),
+            "model": sample_a.metadata.get("model", ""),
+            "format": sample_a.metadata.get("format", ""),
+            "sample_rate": sample_a.metadata.get("sample_rate", "")
+        }
+    
+    if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+        config_provider_b = {
+            "provider": pair.get("provider_b", ""),
+            "voice": pair.get("voice_b", ""),
+            "model": sample_b.metadata.get("model", ""),
+            "format": sample_b.metadata.get("format", ""),
+            "sample_rate": sample_b.metadata.get("sample_rate", "")
+        }
+    
+    # Determine winner and loser configs based on choice
+    if choice == "A":
+        winner_config = config_provider_a
+        loser_config = config_provider_b
+    else:
+        winner_config = config_provider_b
+        loser_config = config_provider_a
+    
+    # Record result with comment and API configs
     result_record = {
         "comparison_num": current_comparison + 1,
         "winner": winner_provider,
@@ -3185,9 +3313,16 @@ def handle_vote_2(choice: str, pair: dict):
         "loser": loser_provider,
         "loser_voice": loser_voice,
         "text": pair["text"],
-        "user_choice": choice
+        "user_choice": choice,
+        "comment": comment,
+        "winner_config": winner_config,
+        "loser_config": loser_config
     }
     st.session_state.blind_test_2_results_history.append(result_record)
+    
+    # Clear comment from session state after saving
+    if comment_key in st.session_state:
+        del st.session_state[comment_key]
     
     # Move to next comparison
     st.session_state.blind_test_2_comparison_count += 1
@@ -3262,7 +3397,45 @@ def handle_vote(choice: str, pair: dict):
     except Exception as e:
         print(f"Error updating ratings: {e}")
     
-    # Record result
+    # Get comment for this comparison
+    comment_key = f"comment_{current_comparison}"
+    comment = st.session_state.get(comment_key, "")
+    
+    # Extract API configuration from samples
+    sample_a = pair.get("sample_a")
+    sample_b = pair.get("sample_b")
+    
+    # Get API configs from metadata - map to provider_a and provider_b
+    config_provider_a = {}
+    config_provider_b = {}
+    
+    if sample_a and hasattr(sample_a, 'metadata') and sample_a.metadata:
+        config_provider_a = {
+            "provider": pair.get("provider_a", ""),
+            "voice": pair.get("voice_a", ""),
+            "model": sample_a.metadata.get("model", ""),
+            "format": sample_a.metadata.get("format", ""),
+            "sample_rate": sample_a.metadata.get("sample_rate", "")
+        }
+    
+    if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+        config_provider_b = {
+            "provider": pair.get("provider_b", ""),
+            "voice": pair.get("voice_b", ""),
+            "model": sample_b.metadata.get("model", ""),
+            "format": sample_b.metadata.get("format", ""),
+            "sample_rate": sample_b.metadata.get("sample_rate", "")
+        }
+    
+    # Determine winner and loser configs based on choice
+    if choice == "A":
+        winner_config = config_provider_a
+        loser_config = config_provider_b
+    else:
+        winner_config = config_provider_b
+        loser_config = config_provider_a
+    
+    # Record result with comment and API configs
     result_record = {
         "comparison_num": current_comparison + 1,
         "winner": winner_provider,
@@ -3271,9 +3444,16 @@ def handle_vote(choice: str, pair: dict):
         "loser_voice": loser_voice,
         "text": pair["text"],
         "murf_won": (pair["murf_is"] == choice),
-        "user_choice": choice
+        "user_choice": choice,
+        "comment": comment,
+        "winner_config": winner_config,
+        "loser_config": loser_config
     }
     st.session_state.blind_test_results_history.append(result_record)
+    
+    # Clear comment from session state after saving
+    if comment_key in st.session_state:
+        del st.session_state[comment_key]
     
     # Move to next comparison
     st.session_state.blind_test_comparison_count += 1
@@ -3484,6 +3664,25 @@ def display_final_results_2():
     
     st.divider()
     
+    # Results table with comments
+    st.subheader("All Comparisons")
+    comparison_data = []
+    for result in results:
+        comparison_data.append({
+            "Comparison": result["comparison_num"],
+            "Winner": get_provider_display_name(result["winner"]),
+            "Winner Voice": result["winner_voice"],
+            "Loser": get_provider_display_name(result["loser"]),
+            "Loser Voice": result["loser_voice"],
+            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"],
+            "Comment": result.get('comment', '') if result.get('comment') else '-'
+        })
+    
+    df = pd.DataFrame(comparison_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    st.divider()
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -3616,6 +3815,25 @@ def display_final_results():
         else:
             total_providers = len(set([r["winner"] for r in results] + [r["loser"] for r in results]))
             st.metric("Providers Tested", total_providers)
+    
+    st.divider()
+    
+    # Results table with comments
+    st.subheader("All Comparisons")
+    comparison_data = []
+    for result in results:
+        comparison_data.append({
+            "Comparison": result["comparison_num"],
+            "Winner": get_provider_display_name(result["winner"]),
+            "Winner Voice": result["winner_voice"],
+            "Loser": get_provider_display_name(result["loser"]),
+            "Loser Voice": result["loser_voice"],
+            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"],
+            "Comment": result.get('comment', '') if result.get('comment') else '-'
+        })
+    
+    df = pd.DataFrame(comparison_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
     
     st.divider()
     
