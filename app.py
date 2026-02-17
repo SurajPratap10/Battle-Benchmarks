@@ -2948,52 +2948,34 @@ def generate_fvs_comparison():
     text = random.choice(available_sentences)
     st.session_state.used_sentences_fvs.append(text)
     
-    # Get all voices matching locale and gender - automatically shuffle
+    # Get all voices matching locale and gender - use same voice for both providers
     falcon_voice_info = TTS_PROVIDERS["murf_falcon_oct23"].voice_info
-    zeroshot_voice_info = TTS_PROVIDERS["murf_zeroshot"].voice_info
     
-    # Get all Falcon voices matching gender and locale
-    filtered_falcon_voices = []
+    # Get all voices matching gender and locale (same for both Falcon and Zeroshot)
+    filtered_voices = []
     for v, info in falcon_voice_info.items():
         if info.gender == gender_filter:
             if locale_filter is None:
-                filtered_falcon_voices.append(v)
+                filtered_voices.append(v)
             else:
                 # Check if voice matches locale
                 voice_locale = "-".join(v.split("-")[:2])
                 if voice_locale == locale_filter:
-                    filtered_falcon_voices.append(v)
+                    filtered_voices.append(v)
     
-    # Get all Zeroshot voices matching gender and locale
-    filtered_zeroshot_voices = []
-    for v, info in zeroshot_voice_info.items():
-        if info.gender == gender_filter:
-            if locale_filter is None:
-                filtered_zeroshot_voices.append(v)
-            else:
-                # Check if voice matches locale
-                voice_locale = "-".join(v.split("-")[:2])
-                if voice_locale == locale_filter:
-                    filtered_zeroshot_voices.append(v)
-    
-    if not filtered_falcon_voices:
-        st.error(f"No Falcon voices found for {gender_filter} gender and locale {locale_filter if locale_filter else 'All'}")
+    if not filtered_voices:
+        st.error(f"No voices found for {gender_filter} gender and locale {locale_filter if locale_filter else 'All'}")
         return
     
-    if not filtered_zeroshot_voices:
-        st.error(f"No Zeroshot voices found for {gender_filter} gender and locale {locale_filter if locale_filter else 'All'}")
-        return
+    # Shuffle voices for variety (only once since both providers use same voices)
+    random.shuffle(filtered_voices)
     
-    # Shuffle voices for variety
-    random.shuffle(filtered_falcon_voices)
-    random.shuffle(filtered_zeroshot_voices)
+    # Cycle through voices using comparison index - use same voice for both providers
+    voice_index = comparison_index % len(filtered_voices)
     
-    # Cycle through voices using comparison index
-    falcon_voice_index = comparison_index % len(filtered_falcon_voices)
-    zeroshot_voice_index = comparison_index % len(filtered_zeroshot_voices)
-    
-    falcon_voice = filtered_falcon_voices[falcon_voice_index]
-    zeroshot_voice = filtered_zeroshot_voices[zeroshot_voice_index]
+    # Use the same voice ID for both Falcon and Zeroshot
+    falcon_voice = filtered_voices[voice_index]
+    zeroshot_voice = filtered_voices[voice_index]
     
     # Generate samples
     sample_a, sample_b = asyncio.run(generate_comparison_samples(
