@@ -674,14 +674,7 @@ def get_api_key(provider: str) -> str:
     env_var = TTS_PROVIDERS[provider].api_key_env
     api_key = os.getenv(env_var)
     
-    # Special handling for murf_zeroshot - use dev API key
-    if provider == "murf_zeroshot":
-        # First try MURF_DEV_API_KEY from env
-        if api_key:
-            return api_key
-        # Fallback to hardcoded dev API key for zeroshot
-        return "REDACTED_API_KEY_REMOVED"
-    
+    # All API keys must come from environment variables - no hardcoded fallbacks
     if not api_key:
         raise ValueError(f"API key not found for {provider}. Please set {env_var} environment variable.")
     
