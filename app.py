@@ -172,7 +172,7 @@ def main():
         
         st.subheader("Navigator")
         
-        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Quick Test"]
+        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Falcon vs Zeroshot", "Quick Test"]
         
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
@@ -228,6 +228,8 @@ def main():
         blind_test_page()
     elif page == "Ranked Blind Test":
         blind_test_2_page()
+    elif page == "Falcon vs Zeroshot":
+        falcon_vs_zeroshot_page()
     elif page == "Leaderboard":
         leaderboard_page()
 
@@ -612,6 +614,77 @@ def blind_test_2_page():
     else:
         # No test in progress - show setup
         display_blind_test_2_setup(configured_providers)
+
+def falcon_vs_zeroshot_page():
+    """Falcon vs Zeroshot comparison page - does NOT update leaderboard"""
+    
+    st.header("Falcon vs Zeroshot")
+    st.markdown("Compare Murf Falcon and Zeroshot models head-to-head. Results do not affect leaderboard.")
+    
+    config_status = check_configuration()
+    
+    if not st.session_state.config_valid:
+        st.warning("Please configure at least one API key in the sidebar first.")
+        return
+    
+    # Check if both Murf providers are configured
+    murf_falcon_configured = config_status["providers"].get("murf_falcon_oct23", {}).get("configured", False)
+    murf_zeroshot_configured = config_status["providers"].get("murf_zeroshot", {}).get("configured", False)
+    
+    if not murf_falcon_configured or not murf_zeroshot_configured:
+        st.error("⚠️ Both Murf Falcon and Murf Zeroshot must be configured to use this page.")
+        return
+    
+    # Initialize session state for Falcon vs Zeroshot test
+    if "fvs_sentences" not in st.session_state:
+        st.session_state.fvs_sentences = []
+    if "fvs_current_pair" not in st.session_state:
+        st.session_state.fvs_current_pair = None
+    if "fvs_comparison_count" not in st.session_state:
+        st.session_state.fvs_comparison_count = 0
+    if "fvs_max_comparisons" not in st.session_state:
+        st.session_state.fvs_max_comparisons = 25
+    # Don't reset it here - let the slider control it
+    if "fvs_results_history" not in st.session_state:
+        st.session_state.fvs_results_history = []
+    if "fvs_falcon_voice" not in st.session_state:
+        st.session_state.fvs_falcon_voice = None
+    if "fvs_falcon_voices" not in st.session_state:
+        st.session_state.fvs_falcon_voices = []
+    if "fvs_zeroshot_voice" not in st.session_state:
+        st.session_state.fvs_zeroshot_voice = None
+    if "fvs_zeroshot_voices" not in st.session_state:
+        st.session_state.fvs_zeroshot_voices = []
+    if "fvs_gender_filter" not in st.session_state:
+        st.session_state.fvs_gender_filter = "female"
+    if "fvs_setup_complete" not in st.session_state:
+        st.session_state.fvs_setup_complete = False
+    if "fvs_audio_played" not in st.session_state:
+        st.session_state.fvs_audio_played = {"A": 0, "B": 0}
+    if "fvs_show_final_results" not in st.session_state:
+        st.session_state.fvs_show_final_results = False
+    if "fvs_locale_filter" not in st.session_state:
+        st.session_state.fvs_locale_filter = None  # None means all locales
+    
+    # If final results should be shown, display them directly
+    if st.session_state.get("fvs_show_final_results", False):
+        display_fvs_final_results()
+        return
+    
+    # Show setup or comparison view
+    test_in_progress = (
+        st.session_state.fvs_setup_complete or 
+        st.session_state.fvs_comparison_count > 0 or 
+        st.session_state.fvs_current_pair is not None or
+        len(st.session_state.fvs_results_history) > 0
+    )
+    
+    if test_in_progress:
+        # Test is in progress - show comparison view
+        display_fvs_comparison()
+    else:
+        # No test in progress - show setup
+        display_fvs_setup()
 
 def display_blind_test_2_setup(configured_providers: List[str]):
     """Display the blind test 2 setup page"""
@@ -2595,6 +2668,474 @@ async def generate_comparison_samples(text: str, provider_a: str, voice_a: str, 
     result_b = results[1] if not isinstance(results[1], Exception) else None
     
     return result_a, result_b
+
+def display_fvs_setup():
+    """Display the Falcon vs Zeroshot setup page"""
+    from config import get_voices_by_gender, get_voice_gender
+    from dataset import DatasetGenerator
+    import random
+    
+    # Initialize filters if not set
+    if "fvs_gender_filter" not in st.session_state:
+        st.session_state.fvs_gender_filter = "female"
+    if "fvs_locale_filter" not in st.session_state:
+        st.session_state.fvs_locale_filter = None
+    
+    # Extract all available locales from Murf voices
+    all_locales = set()
+    for voice_id in TTS_PROVIDERS["murf_falcon_oct23"].supported_voices:
+        parts = voice_id.split("-")
+        if len(parts) >= 2:
+            locale = f"{parts[0]}-{parts[1]}"
+            all_locales.add(locale)
+    
+    locale_options = ["All Locales"] + sorted(list(all_locales))
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**1. Select Locale**")
+        selected_locale_display = st.selectbox(
+            "Choose locale:",
+            locale_options,
+            index=0 if st.session_state.fvs_locale_filter is None else (locale_options.index(st.session_state.fvs_locale_filter) if st.session_state.fvs_locale_filter in locale_options else 0),
+            key="fvs_locale_select"
+        )
+        
+        if selected_locale_display == "All Locales":
+            st.session_state.fvs_locale_filter = None
+        else:
+            st.session_state.fvs_locale_filter = selected_locale_display
+        
+        # Show available voices count for selected locale and gender
+        falcon_voice_info = TTS_PROVIDERS["murf_falcon_oct23"].voice_info
+        zeroshot_voice_info = TTS_PROVIDERS["murf_zeroshot"].voice_info
+        gender = st.session_state.fvs_gender_filter
+        locale = st.session_state.fvs_locale_filter
+        
+        falcon_count = 0
+        zeroshot_count = 0
+        for v, info in falcon_voice_info.items():
+            if info.gender == gender:
+                if locale is None:
+                    falcon_count += 1
+                else:
+                    voice_locale = "-".join(v.split("-")[:2])
+                    if voice_locale == locale:
+                        falcon_count += 1
+        
+        for v, info in zeroshot_voice_info.items():
+            if info.gender == gender:
+                if locale is None:
+                    zeroshot_count += 1
+                else:
+                    voice_locale = "-".join(v.split("-")[:2])
+                    if voice_locale == locale:
+                        zeroshot_count += 1
+        
+        st.caption(f"Available voices: Falcon ({falcon_count}), Zeroshot ({zeroshot_count})")
+    
+    with col2:
+        st.markdown("**2. Select Gender**")
+        selected_gender_radio = st.radio(
+            "**Gender:**",
+            ["Male", "Female"],
+            index=0 if st.session_state.fvs_gender_filter == "female" else 1,
+            horizontal=True,
+            key="fvs_gender_radio"
+        )
+        
+        new_gender = selected_gender_radio.lower()
+        if new_gender != st.session_state.fvs_gender_filter:
+            st.session_state.fvs_gender_filter = new_gender
+            st.rerun()
+    
+    with col3:
+        st.markdown("**3. Number of Comparisons**")
+        # Use a different key for the slider to avoid conflicts, then sync to session state
+        # This pattern matches ranked blind test and prevents reset on gender change
+        max_comparisons = st.slider(
+            "Comparisons:",
+            min_value=5,
+            max_value=50,
+            value=st.session_state.fvs_max_comparisons,
+            step=5,
+            help="How many head-to-head comparisons to run",
+            key="fvs_max_comparisons_slider"
+        )
+        # Sync the slider value to session state (preserves value across reruns)
+        st.session_state.fvs_max_comparisons = max_comparisons
+        st.caption(f"Will run {st.session_state.fvs_max_comparisons} comparisons")
+    
+    st.divider()
+    
+    # Sentence selection
+    st.markdown("**3. Upload Test Sentences** (System will pick randomly)")
+    
+    sentences_text = st.text_area(
+        "Enter sentences (one per line):",
+        value="""The quick brown fox jumps over the lazy dog.
+The wine glass fills again and laughter breaks through the pressure that had been building quietly for hours.
+Just to confirm, the co-applicant's name is spelled M-A-R-I-S-A, correct?
+Scientists have made a groundbreaking discovery that could revolutionize renewable energy.
+Hello, how can I assist you today with your account inquiry?""",
+        height=200,
+        help="Enter multiple sentences, one per line. The system will randomly select sentences for each test. Supports all languages including Hindi, Chinese, etc.",
+        key="fvs_sentences_text"
+    )
+    
+    # Parse sentences - handle Unicode properly (supports Hindi, Chinese, etc.)
+    # Split by newlines and filter out empty lines
+    # Streamlit text_area returns strings, so we just need to ensure proper Unicode handling
+    sentences = [s.strip() for s in sentences_text.strip().split('\n') if s.strip()]
+    
+    # Debug: Log sentence count and first sentence (for troubleshooting)
+    if sentences:
+        print(f"[FVS DEBUG] Parsed {len(sentences)} sentences. First sentence: '{sentences[0][:50]}...'")
+    
+    # Check if sentences have changed - if so, clear current pair to force regeneration
+    if "fvs_sentences_hash" not in st.session_state:
+        st.session_state.fvs_sentences_hash = None
+    
+    import hashlib
+    # Hash sentences with proper UTF-8 encoding to handle all languages (Hindi, Chinese, etc.)
+    sentences_hash = hashlib.md5(str(sorted(sentences)).encode('utf-8')).hexdigest()
+    
+    # If sentences changed and there's a current pair, clear it
+    if (st.session_state.fvs_sentences_hash is not None and 
+        st.session_state.fvs_sentences_hash != sentences_hash and
+        st.session_state.fvs_current_pair is not None):
+        st.session_state.fvs_current_pair = None
+        st.session_state.fvs_comparison_count = 0
+        st.session_state.fvs_results_history = []
+        st.session_state.used_sentences_fvs = []  # Reset used sentences when sentences change
+    
+    st.session_state.fvs_sentences = sentences
+    st.session_state.fvs_sentences_hash = sentences_hash
+    
+    if sentences:
+        st.caption(f"📝 {len(sentences)} sentences loaded")
+    else:
+        st.warning("Please enter at least one sentence")
+    
+    can_start = len(st.session_state.fvs_sentences) >= 1
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("Start Comparison", type="primary", disabled=not can_start, key="fvs_start"):
+            # The slider with key="fvs_max_comparisons" automatically updates session state
+            # No need to manually set it - just use the value that's already there
+            st.session_state.fvs_setup_complete = True
+            st.session_state.fvs_comparison_count = 0
+            st.session_state.fvs_results_history = []
+            st.session_state.fvs_current_pair = None
+            st.session_state.used_sentences_fvs = []  # Reset used sentences for new test
+            st.rerun()
+    
+    if not can_start:
+        st.caption("Ensure sentences are loaded")
+
+def display_fvs_comparison():
+    """Display the Falcon vs Zeroshot comparison"""
+    # Check if we should show final results
+    if st.session_state.get("fvs_show_final_results", False):
+        st.session_state.fvs_current_pair = None
+        display_fvs_final_results()
+        return
+    
+    # Check if we need to generate a new pair
+    force_regen = st.session_state.get("force_regenerate_fvs", False)
+    if st.session_state.fvs_current_pair is None or force_regen:
+        st.session_state.force_regenerate_fvs = False
+        if "fvs_audio_played" in st.session_state:
+            st.session_state.fvs_audio_played = {"A": 0, "B": 0}
+        st.session_state.fvs_current_pair = None
+        generate_fvs_comparison()
+        return
+    
+    pair = st.session_state.fvs_current_pair
+    
+    if pair is None or pair.get("error"):
+        error_msg = pair.get("message", "Failed to generate comparison.") if pair else "Failed to generate comparison."
+        st.error(f"⚠️ {error_msg}")
+        if st.button("Retry", type="primary", key="fvs_retry"):
+            st.session_state.fvs_current_pair = None
+            st.rerun()
+        return
+    
+    # Progress indicator
+    progress = st.session_state.fvs_comparison_count / st.session_state.fvs_max_comparisons
+    st.progress(progress)
+    st.caption(f"Comparison {st.session_state.fvs_comparison_count + 1} of {st.session_state.fvs_max_comparisons}")
+    
+    # Display the prompt/sentence - sleek gray design (same as ranked blind test)
+    st.markdown(f"""
+    <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin: 8px 0;">
+        <span style="color: #666; font-size: 0.85em; font-weight: 500;">PROMPT</span>
+        <p style="color: #333; font-size: 1em; margin: 4px 0 0 0; line-height: 1.5;">{pair['text']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<p style='color: #888; font-size: 0.9em; margin: 16px 0 8px 0;'>Vote to reveal your model preference</p>", unsafe_allow_html=True)
+    
+    sample_a = pair["sample_a"]
+    sample_b = pair["sample_b"]
+    
+    # Generate unique comparison key for audio players
+    comparison_key = f"fvs_{st.session_state.fvs_comparison_count}_{pair.get('comparison_id', '')}"
+    
+    # Audio players side by side
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        display_audio_player(sample_a, "A", "left", comparison_key)
+        # Add spacing and center the button
+        st.markdown('<div style="margin-top: 16px;"></div>', unsafe_allow_html=True)
+        button_col1, button_col2, button_col3 = st.columns([1, 2, 1])
+        with button_col2:
+            if st.button("Vote A", type="primary", key="fvs_vote_a", use_container_width=True):
+                handle_fvs_vote("A", pair)
+    
+    with col2:
+        display_audio_player(sample_b, "B", "right", comparison_key)
+        # Add spacing and center the button
+        st.markdown('<div style="margin-top: 16px;"></div>', unsafe_allow_html=True)
+        button_col1, button_col2, button_col3 = st.columns([1, 2, 1])
+        with button_col2:
+            if st.button("Vote B", type="primary", key="fvs_vote_b", use_container_width=True):
+                handle_fvs_vote("B", pair)
+    
+    st.divider()
+    
+    # Action button - End Test only (centered, medium size)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("End Test", key="fvs_end_test", use_container_width=True):
+            st.session_state.fvs_show_final_results = True
+            st.rerun()
+
+def generate_fvs_comparison():
+    """Generate the next Falcon vs Zeroshot comparison"""
+    from config import get_voices_by_gender
+    import random
+    import time
+    
+    # Check if we've reached max comparisons
+    if st.session_state.fvs_comparison_count >= st.session_state.fvs_max_comparisons:
+        st.session_state.fvs_show_final_results = True
+        st.rerun()
+        return
+    
+    # Get gender filter
+    gender_filter = st.session_state.fvs_gender_filter
+    comparison_index = st.session_state.fvs_comparison_count
+    locale_filter = st.session_state.fvs_locale_filter
+    
+    # Get a random sentence
+    sentences = st.session_state.fvs_sentences
+    if not sentences:
+        st.error("No sentences available")
+        return
+    
+    if "used_sentences_fvs" not in st.session_state:
+        st.session_state.used_sentences_fvs = []
+    
+    available_sentences = [s for s in sentences if s not in st.session_state.used_sentences_fvs]
+    if not available_sentences:
+        st.session_state.used_sentences_fvs = []
+        available_sentences = sentences
+    
+    text = random.choice(available_sentences)
+    st.session_state.used_sentences_fvs.append(text)
+    
+    # Get all voices matching locale and gender - automatically shuffle
+    falcon_voice_info = TTS_PROVIDERS["murf_falcon_oct23"].voice_info
+    zeroshot_voice_info = TTS_PROVIDERS["murf_zeroshot"].voice_info
+    
+    # Get all Falcon voices matching gender and locale
+    filtered_falcon_voices = []
+    for v, info in falcon_voice_info.items():
+        if info.gender == gender_filter:
+            if locale_filter is None:
+                filtered_falcon_voices.append(v)
+            else:
+                # Check if voice matches locale
+                voice_locale = "-".join(v.split("-")[:2])
+                if voice_locale == locale_filter:
+                    filtered_falcon_voices.append(v)
+    
+    # Get all Zeroshot voices matching gender and locale
+    filtered_zeroshot_voices = []
+    for v, info in zeroshot_voice_info.items():
+        if info.gender == gender_filter:
+            if locale_filter is None:
+                filtered_zeroshot_voices.append(v)
+            else:
+                # Check if voice matches locale
+                voice_locale = "-".join(v.split("-")[:2])
+                if voice_locale == locale_filter:
+                    filtered_zeroshot_voices.append(v)
+    
+    if not filtered_falcon_voices:
+        st.error(f"No Falcon voices found for {gender_filter} gender and locale {locale_filter if locale_filter else 'All'}")
+        return
+    
+    if not filtered_zeroshot_voices:
+        st.error(f"No Zeroshot voices found for {gender_filter} gender and locale {locale_filter if locale_filter else 'All'}")
+        return
+    
+    # Shuffle voices for variety
+    random.shuffle(filtered_falcon_voices)
+    random.shuffle(filtered_zeroshot_voices)
+    
+    # Cycle through voices using comparison index
+    falcon_voice_index = comparison_index % len(filtered_falcon_voices)
+    zeroshot_voice_index = comparison_index % len(filtered_zeroshot_voices)
+    
+    falcon_voice = filtered_falcon_voices[falcon_voice_index]
+    zeroshot_voice = filtered_zeroshot_voices[zeroshot_voice_index]
+    
+    # Generate samples
+    sample_a, sample_b = asyncio.run(generate_comparison_samples(
+        text, "murf_falcon_oct23", falcon_voice, "murf_zeroshot", zeroshot_voice
+    ))
+    
+    if not sample_a or not sample_a.success:
+        st.session_state.fvs_current_pair = {
+            "error": True,
+            "message": f"Failed to generate Falcon sample: {sample_a.error_message if sample_a else 'Unknown error'}"
+        }
+        return
+    
+    if not sample_b or not sample_b.success:
+        st.session_state.fvs_current_pair = {
+            "error": True,
+            "message": f"Failed to generate Zeroshot sample: {sample_b.error_message if sample_b else 'Unknown error'}"
+        }
+        return
+    
+    # Randomize order
+    falcon_is_a = random.random() > 0.5
+    unique_timestamp = time.time()
+    comparison_id = f"{st.session_state.fvs_comparison_count}_{unique_timestamp}"
+    
+    if falcon_is_a:
+        st.session_state.fvs_current_pair = {
+            "sample_a": sample_a, "sample_b": sample_b,
+            "provider_a": "murf_falcon_oct23", "provider_b": "murf_zeroshot",
+            "voice_a": falcon_voice, "voice_b": zeroshot_voice,
+            "text": text, "falcon_is": "A", "generated_at": unique_timestamp,
+            "comparison_id": comparison_id
+        }
+    else:
+        st.session_state.fvs_current_pair = {
+            "sample_a": sample_b, "sample_b": sample_a,
+            "provider_a": "murf_zeroshot", "provider_b": "murf_falcon_oct23",
+            "voice_a": zeroshot_voice, "voice_b": falcon_voice,
+            "text": text, "falcon_is": "B", "generated_at": unique_timestamp,
+            "comparison_id": comparison_id
+        }
+    
+    st.session_state.fvs_audio_played = {"A": 0, "B": 0}
+    st.rerun()
+
+def handle_fvs_vote(choice: str, pair: dict):
+    """Handle a vote for Falcon vs Zeroshot - does NOT update ELO/leaderboard"""
+    # Prevent double voting
+    current_comparison = st.session_state.fvs_comparison_count
+    if st.session_state.get("last_voted_comparison_fvs") == current_comparison:
+        return
+    
+    st.session_state.last_voted_comparison_fvs = current_comparison
+    st.session_state.fvs_current_pair = None
+    st.session_state.force_regenerate_fvs = True
+    
+    # Determine winner and loser
+    if choice == "A":
+        winner_provider = pair["provider_a"]
+        loser_provider = pair["provider_b"]
+        winner_voice = pair["voice_a"]
+        loser_voice = pair["voice_b"]
+    else:
+        winner_provider = pair["provider_b"]
+        loser_provider = pair["provider_a"]
+        winner_voice = pair["voice_b"]
+        loser_voice = pair["voice_a"]
+    
+    print(f"FVS Vote: {choice} | Winner: {winner_provider} | Loser: {loser_provider}")
+    
+    # Record result (NO ELO UPDATE - this is the key difference)
+    result_record = {
+        "comparison_num": current_comparison + 1,
+        "winner": winner_provider,
+        "winner_voice": winner_voice,
+        "loser": loser_provider,
+        "loser_voice": loser_voice,
+        "text": pair["text"],
+        "falcon_won": (pair["falcon_is"] == choice),
+        "user_choice": choice
+    }
+    st.session_state.fvs_results_history.append(result_record)
+    
+    # Move to next comparison
+    st.session_state.fvs_comparison_count += 1
+    
+    # Check if done
+    if st.session_state.fvs_comparison_count >= st.session_state.fvs_max_comparisons:
+        st.session_state.fvs_show_final_results = True
+        st.session_state.fvs_current_pair = None
+    else:
+        st.session_state.fvs_current_pair = None
+        if "fvs_audio_played" in st.session_state:
+            st.session_state.fvs_audio_played = {"A": 0, "B": 0}
+    
+    st.rerun()
+
+def display_fvs_final_results():
+    """Display final results for Falcon vs Zeroshot"""
+    results = st.session_state.fvs_results_history
+    
+    if not results:
+        st.info("No results to display")
+        return
+    
+    st.subheader("Results")
+    
+    falcon_wins = sum(1 for r in results if r["winner"] == "murf_falcon_oct23")
+    zeroshot_wins = sum(1 for r in results if r["winner"] == "murf_zeroshot")
+    total = len(results)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Murf Falcon Wins", falcon_wins, f"{falcon_wins/total*100:.1f}%")
+    with col2:
+        st.metric("Murf Zeroshot Wins", zeroshot_wins, f"{zeroshot_wins/total*100:.1f}%")
+    
+    # Results table
+    st.subheader("All Comparisons")
+    comparison_data = []
+    for result in results:
+        comparison_data.append({
+            "Comparison": result["comparison_num"],
+            "Winner": "Murf Falcon" if result["winner"] == "murf_falcon_oct23" else "Murf Zeroshot",
+            "Winner Voice": result["winner_voice"],
+            "Loser": "Murf Falcon" if result["loser"] == "murf_falcon_oct23" else "Murf Zeroshot",
+            "Loser Voice": result["loser_voice"],
+            "Text": result["text"][:50] + "..." if len(result["text"]) > 50 else result["text"]
+        })
+    
+    df = pd.DataFrame(comparison_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    if st.button("Start New Test", type="primary", key="fvs_new_test"):
+        # Reset all state
+        st.session_state.fvs_setup_complete = False
+        st.session_state.fvs_comparison_count = 0
+        st.session_state.fvs_results_history = []
+        st.session_state.fvs_current_pair = None
+        st.session_state.fvs_show_final_results = False
+        st.session_state.used_sentences_fvs = []
+        st.rerun()
 
 
 def handle_vote_2(choice: str, pair: dict):
