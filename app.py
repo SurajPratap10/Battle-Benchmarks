@@ -197,6 +197,8 @@ def main():
                 # Show "Murf Falcon" in configuration sidebar for Murf
                 if provider_id == "murf_falcon_oct23":
                     display_name = "Murf Falcon"
+                elif provider_id == "murf_zeroshot":
+                    display_name = "Murf Zeroshot (Dev)"
                 else:
                     display_name = provider_name
                 if status["configured"]:
@@ -213,6 +215,8 @@ def main():
                     # Show "Murf Falcon" in configuration sidebar for Murf
                     if provider_id == "murf_falcon_oct23":
                         display_name = "Murf Falcon"
+                    elif provider_id == "murf_zeroshot":
+                        display_name = "Murf Zeroshot"
                     else:
                         display_name = provider_name
                     st.code(f"export {env_var}=your_api_key_here")
@@ -266,6 +270,8 @@ def quick_test_page():
         # Show "Murf Falcon" in quick test dropdown for Murf
         if p == "murf_falcon_oct23":
             display_name = "Murf Falcon"
+        elif p == "murf_zeroshot":
+            display_name = "Murf Zeroshot"
         else:
             display_name = get_provider_display_name(p)
         provider_display_options.append(display_name)
@@ -285,6 +291,9 @@ def quick_test_page():
             if display_name == "Murf Falcon" and p == "murf_falcon_oct23":
                 selected_providers.append(p)
                 break
+            elif display_name == "Murf Zeroshot" and p == "murf_zeroshot":
+                selected_providers.append(p)
+                break
             elif get_provider_display_name(p) == display_name:
                 selected_providers.append(p)
                 break
@@ -301,6 +310,8 @@ def quick_test_page():
                     # Show "Murf Falcon" in quick test dropdown for Murf
                     if provider == "murf_falcon_oct23":
                         provider_display = "Murf Falcon"
+                    elif provider == "murf_zeroshot":
+                        provider_display = "Murf Zeroshot"
                     else:
                         provider_display = get_provider_display_name(provider)
                     voice_options[provider] = st.selectbox(
@@ -2043,13 +2054,22 @@ def generate_next_comparison():
     print(f"[CRITICAL DEBUG] Selected sentence #{len(st.session_state.used_sentences)}: '{text[:80]}...'")
     print(f"[CRITICAL DEBUG] Available sentences: {len(available_sentences)}, Total: {len(sentences)}")
     
-    # Get configured Murf provider
+    # Get configured Murf provider - use selected provider from setup, or fallback to falcon
     config_status = check_configuration()
     murf_providers = [
         p for p, status in config_status["providers"].items() 
         if status["configured"] and "murf" in p.lower()
     ]
-    murf_provider_id = "murf_falcon_oct23" if "murf_falcon_oct23" in murf_providers else (murf_providers[0] if murf_providers else None)
+    
+    # Use the provider selected in setup screen, or fallback to falcon if available
+    if "blind_test_murf_provider" in st.session_state and st.session_state.blind_test_murf_provider in murf_providers:
+        murf_provider_id = st.session_state.blind_test_murf_provider
+    elif "murf_falcon_oct23" in murf_providers:
+        murf_provider_id = "murf_falcon_oct23"
+    elif murf_providers:
+        murf_provider_id = murf_providers[0]
+    else:
+        murf_provider_id = None
     
     if not murf_provider_id:
         st.error("No Murf provider configured. Please set MURF_API_KEY.")
