@@ -2934,6 +2934,7 @@ Hello, how can I assist you today with your account inquiry?""",
             st.session_state.fvs_results_history = []
             st.session_state.fvs_current_pair = None
             st.session_state.used_sentences_fvs = []  # Reset used sentences for new test
+            st.session_state.fvs_test_start_time = datetime.now()  # Store test start timestamp
             st.rerun()
     
     if not can_start:
@@ -3182,21 +3183,33 @@ def handle_fvs_vote(choice: str, pair: dict):
     config_provider_b = {}
     
     if sample_a and hasattr(sample_a, 'metadata') and sample_a.metadata:
+        # Get endpoint URL from config for Murf providers
+        endpoint_url_a = ""
+        if provider_a_id in TTS_PROVIDERS:
+            endpoint_url_a = TTS_PROVIDERS[provider_a_id].base_url
+        
         config_provider_a = {
-            "provider": pair.get("provider_a", ""),
+            "provider": provider_a_id,
             "voice": pair.get("voice_a", ""),
             "model": sample_a.metadata.get("model", ""),
             "format": sample_a.metadata.get("format", ""),
-            "sample_rate": sample_a.metadata.get("sample_rate", "")
+            "sample_rate": sample_a.metadata.get("sample_rate", ""),
+            "endpoint_url": endpoint_url_a
         }
     
     if sample_b and hasattr(sample_b, 'metadata') and sample_b.metadata:
+        # Get endpoint URL from config for Murf providers
+        endpoint_url_b = ""
+        if provider_b_id in TTS_PROVIDERS:
+            endpoint_url_b = TTS_PROVIDERS[provider_b_id].base_url
+        
         config_provider_b = {
-            "provider": pair.get("provider_b", ""),
+            "provider": provider_b_id,
             "voice": pair.get("voice_b", ""),
             "model": sample_b.metadata.get("model", ""),
             "format": sample_b.metadata.get("format", ""),
-            "sample_rate": sample_b.metadata.get("sample_rate", "")
+            "sample_rate": sample_b.metadata.get("sample_rate", ""),
+            "endpoint_url": endpoint_url_b
         }
     
     # Determine winner and loser configs based on choice
@@ -3206,6 +3219,11 @@ def handle_fvs_vote(choice: str, pair: dict):
     else:
         winner_config = config_provider_b
         loser_config = config_provider_a
+    
+    # Get test start timestamp (store it when test starts if not already stored)
+    if "fvs_test_start_time" not in st.session_state:
+        st.session_state.fvs_test_start_time = datetime.now()
+    test_timestamp = st.session_state.fvs_test_start_time
     
     # Record result (NO ELO UPDATE - this is the key difference)
     result_record = {
@@ -3219,7 +3237,8 @@ def handle_fvs_vote(choice: str, pair: dict):
         "user_choice": choice,
         "comment": comment,
         "winner_config": winner_config,
-        "loser_config": loser_config
+        "loser_config": loser_config,
+        "test_timestamp": test_timestamp
     }
     st.session_state.fvs_results_history.append(result_record)
     
@@ -3261,19 +3280,44 @@ def display_fvs_final_results():
     with col2:
         st.metric("Murf Zeroshot Wins", zeroshot_wins, f"{zeroshot_wins/total*100:.1f}%")
     
-    # Results table with comments
+    # Results table with comments, endpoint URLs, model names, and timestamp
     st.subheader("All Comparisons")
     comparison_data = []
     for result in results:
         # De-anonymize comment if needed (for backward compatibility)
         comment = de_anonymize_comment_from_result(result)
+        
+        # Get endpoint URLs and model names from configs
+        winner_config = result.get("winner_config", {})
+        loser_config = result.get("loser_config", {})
+        
+        winner_endpoint = winner_config.get("endpoint_url", "") or "-"
+        winner_model = winner_config.get("model", "") or "-"
+        loser_endpoint = loser_config.get("endpoint_url", "") or "-"
+        loser_model = loser_config.get("model", "") or "-"
+        
+        # Format timestamp
+        test_timestamp = result.get("test_timestamp")
+        if test_timestamp:
+            if isinstance(test_timestamp, str):
+                timestamp_str = test_timestamp
+            else:
+                timestamp_str = test_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            timestamp_str = "-"
+        
         comparison_data.append({
             "Comparison": result["comparison_num"],
             "Winner": "Murf Falcon" if result["winner"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Winner Voice": result["winner_voice"],
+            "Endpoint 1": winner_endpoint,
+            "Model Name 1": winner_model,
             "Loser": "Murf Falcon" if result["loser"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Loser Voice": result["loser_voice"],
+            "Endpoint 2": loser_endpoint,
+            "Model Name 2": loser_model,
             "Text": result["text"],
+            "Test Timestamp": timestamp_str,
             "Comment": comment if comment else '-'
         })
     
@@ -3290,6 +3334,8 @@ def display_fvs_final_results():
         st.session_state.fvs_current_pair = None
         st.session_state.fvs_show_final_results = False
         st.session_state.used_sentences_fvs = []
+        if "fvs_test_start_time" in st.session_state:
+            del st.session_state.fvs_test_start_time
         st.rerun()
 
 
