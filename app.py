@@ -64,6 +64,82 @@ def get_provider_display_name(provider_id: str) -> str:
         return TTS_PROVIDERS[provider_id].name
     return provider_id.title()
 
+def get_provider_name_for_de_anonymization(provider_id: str) -> str:
+    """Get full provider name for de-anonymization in comments
+    Returns full names like 'Murf Falcon' and 'Murf Zeroshot' instead of just 'Murf'
+    """
+    # Special handling for Murf providers to distinguish between Falcon and Zeroshot
+    if provider_id == "murf_falcon_oct23":
+        return "Murf Falcon"
+    elif provider_id == "murf_zeroshot":
+        return "Murf Zeroshot"
+    elif provider_id in TTS_PROVIDERS:
+        return TTS_PROVIDERS[provider_id].name
+    return provider_id.title()
+
+def de_anonymize_comment(comment: str, provider_a_id: str, provider_b_id: str) -> str:
+    """De-anonymize comment by replacing 'Sample A'/'Sample B' and standalone 'A'/'B' with actual provider names
+    
+    Examples:
+    - "Sample B is more natural" -> "Zeroshot is more natural"
+    - "A is good" -> "Zeroshot is good"
+    - "b sounds better" -> "Murf sounds better"
+    - "Sample a is great" -> "Zeroshot is great"
+    """
+    if not comment:
+        return comment
+    
+    # Use full provider names for de-anonymization (e.g., "Murf Falcon" not just "Murf")
+    provider_a_name = get_provider_name_for_de_anonymization(provider_a_id)
+    provider_b_name = get_provider_name_for_de_anonymization(provider_b_id)
+    
+    import re
+    
+    # Replace "Sample A" or "Sample a" (case-insensitive, word boundaries)
+    # Handle various patterns: "Sample A", "sample A", "Sample A's", "Sample A is", etc.
+    comment = re.sub(r'\bSample\s+A\b', provider_a_name, comment, flags=re.IGNORECASE)
+    
+    # Replace "Sample B" or "Sample b" (case-insensitive, word boundaries)
+    comment = re.sub(r'\bSample\s+B\b', provider_b_name, comment, flags=re.IGNORECASE)
+    
+    # Replace standalone "A" or "a" (case-insensitive, word boundaries ensure it's not part of another word)
+    # This handles: "A is good", "a sounds better", "I prefer A", etc.
+    # Note: Do this AFTER "Sample A" replacement to avoid double replacement
+    comment = re.sub(r'\bA\b', provider_a_name, comment, flags=re.IGNORECASE)
+    
+    # Replace standalone "B" or "b" (case-insensitive, word boundaries ensure it's not part of another word)
+    # This handles: "B is good", "b sounds better", "I prefer B", etc.
+    # Note: Do this AFTER "Sample B" replacement to avoid double replacement
+    comment = re.sub(r'\bB\b', provider_b_name, comment, flags=re.IGNORECASE)
+    
+    return comment
+
+def de_anonymize_comment_from_result(result_record: dict) -> str:
+    """De-anonymize comment from a result record by inferring which provider was A and B
+    
+    Uses user_choice to determine: if user_choice == "A", then winner was Sample A, loser was Sample B
+    """
+    comment = result_record.get('comment', '')
+    if not comment:
+        return comment
+    
+    user_choice = result_record.get('user_choice', '')
+    winner = result_record.get('winner', '')
+    loser = result_record.get('loser', '')
+    
+    # Infer which provider was Sample A and which was Sample B
+    if user_choice == "A":
+        provider_a_id = winner
+        provider_b_id = loser
+    elif user_choice == "B":
+        provider_a_id = loser
+        provider_b_id = winner
+    else:
+        # If no user_choice, can't de-anonymize - return as is
+        return comment
+    
+    return de_anonymize_comment(comment, provider_a_id, provider_b_id)
+
 def get_location_display(result: BenchmarkResult = None, country: str = None, city: str = None) -> str:
     """Helper function to format location display with flag"""
     if result:
@@ -3092,6 +3168,11 @@ def handle_fvs_vote(choice: str, pair: dict):
     comment_key = f"comment_fvs_{current_comparison}"
     comment = st.session_state.get(comment_key, "")
     
+    # De-anonymize comment: replace "Sample A" and "Sample B" with actual provider names
+    provider_a_id = pair.get("provider_a", "")
+    provider_b_id = pair.get("provider_b", "")
+    comment = de_anonymize_comment(comment, provider_a_id, provider_b_id)
+    
     # Extract API configuration from samples
     sample_a = pair.get("sample_a")
     sample_b = pair.get("sample_b")
@@ -3184,6 +3265,8 @@ def display_fvs_final_results():
     st.subheader("All Comparisons")
     comparison_data = []
     for result in results:
+        # De-anonymize comment if needed (for backward compatibility)
+        comment = de_anonymize_comment_from_result(result)
         comparison_data.append({
             "Comparison": result["comparison_num"],
             "Winner": "Murf Falcon" if result["winner"] == "murf_falcon_oct23" else "Murf Zeroshot",
@@ -3191,7 +3274,7 @@ def display_fvs_final_results():
             "Loser": "Murf Falcon" if result["loser"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Loser Voice": result["loser_voice"],
             "Text": result["text"],
-            "Comment": result.get('comment', '') if result.get('comment') else '-'
+            "Comment": comment if comment else '-'
         })
     
     df = pd.DataFrame(comparison_data)
@@ -3270,6 +3353,11 @@ def handle_vote_2(choice: str, pair: dict):
     # Get comment for this comparison
     comment_key = f"comment_2_{current_comparison}"
     comment = st.session_state.get(comment_key, "")
+    
+    # De-anonymize comment: replace "Sample A" and "Sample B" with actual provider names
+    provider_a_id = pair.get("provider_a", "")
+    provider_b_id = pair.get("provider_b", "")
+    comment = de_anonymize_comment(comment, provider_a_id, provider_b_id)
     
     # Extract API configuration from samples
     sample_a = pair.get("sample_a")
@@ -3400,6 +3488,11 @@ def handle_vote(choice: str, pair: dict):
     # Get comment for this comparison
     comment_key = f"comment_{current_comparison}"
     comment = st.session_state.get(comment_key, "")
+    
+    # De-anonymize comment: replace "Sample A" and "Sample B" with actual provider names
+    provider_a_id = pair.get("provider_a", "")
+    provider_b_id = pair.get("provider_b", "")
+    comment = de_anonymize_comment(comment, provider_a_id, provider_b_id)
     
     # Extract API configuration from samples
     sample_a = pair.get("sample_a")
@@ -3668,6 +3761,8 @@ def display_final_results_2():
     st.subheader("All Comparisons")
     comparison_data = []
     for result in results:
+        # De-anonymize comment if needed (for backward compatibility)
+        comment = de_anonymize_comment_from_result(result)
         comparison_data.append({
             "Comparison": result["comparison_num"],
             "Winner": get_provider_display_name(result["winner"]),
@@ -3675,7 +3770,7 @@ def display_final_results_2():
             "Loser": get_provider_display_name(result["loser"]),
             "Loser Voice": result["loser_voice"],
             "Text": result["text"],
-            "Comment": result.get('comment', '') if result.get('comment') else '-'
+            "Comment": comment if comment else '-'
         })
     
     df = pd.DataFrame(comparison_data)
@@ -3822,6 +3917,8 @@ def display_final_results():
     st.subheader("All Comparisons")
     comparison_data = []
     for result in results:
+        # De-anonymize comment if needed (for backward compatibility)
+        comment = de_anonymize_comment_from_result(result)
         comparison_data.append({
             "Comparison": result["comparison_num"],
             "Winner": get_provider_display_name(result["winner"]),
@@ -3829,7 +3926,7 @@ def display_final_results():
             "Loser": get_provider_display_name(result["loser"]),
             "Loser Voice": result["loser_voice"],
             "Text": result["text"],
-            "Comment": result.get('comment', '') if result.get('comment') else '-'
+            "Comment": comment if comment else '-'
         })
     
     df = pd.DataFrame(comparison_data)
