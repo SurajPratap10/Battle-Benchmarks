@@ -485,6 +485,23 @@ class BenchmarkDatabase:
         conn.close()
         return votes
     
+    def get_fvs_votes(self) -> List[tuple]:
+        """Get all votes from Falcon vs Zeroshot tests"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get votes where session_id contains 'fvs' or metadata contains 'falcon_vs_zeroshot'
+        cursor.execute('''
+            SELECT winner, loser, text_sample, timestamp, metadata FROM user_votes 
+            WHERE session_id LIKE '%fvs%' 
+               OR metadata LIKE '%falcon_vs_zeroshot%'
+            ORDER BY timestamp ASC
+        ''')
+        votes = cursor.fetchall()
+        
+        conn.close()
+        return votes
+    
     def get_latency_stats_by_provider(self) -> Dict[str, Dict]:
         """Get latency statistics including P95 for each provider"""
         conn = sqlite3.connect(self.db_path)

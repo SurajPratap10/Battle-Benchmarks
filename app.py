@@ -248,7 +248,7 @@ def main():
         
         st.subheader("Navigator")
         
-        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Falcon vs Zeroshot", "Quick Test"]
+        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Falcon vs Zeroshot", "Results (Falcon vs 0shot)", "Quick Test"]
         
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
@@ -306,6 +306,8 @@ def main():
         blind_test_2_page()
     elif page == "Falcon vs Zeroshot":
         falcon_vs_zeroshot_page()
+    elif page == "Results (Falcon vs 0shot)":
+        fvs_results_page()
     elif page == "Leaderboard":
         leaderboard_page()
 
@@ -761,6 +763,165 @@ def falcon_vs_zeroshot_page():
     else:
         # No test in progress - show setup
         display_fvs_setup()
+
+def fvs_results_page():
+    """Display aggregate locale-level win rates for Falcon vs Zeroshot (Dev-Prod)"""
+    st.header("Results (Falcon vs 0shot)")
+    st.markdown("Aggregate locale-level win rates for Dev-Prod comparison (persistent across sessions)")
+    
+    # Get results from database (persistent, like leaderboard)
+    votes = db.get_fvs_votes()
+    
+    if not votes:
+        st.info("No results available. Complete a Falcon vs Zeroshot test to see aggregate win rates.")
+        return
+    
+    # Parse votes from database into result format
+    results = []
+    for winner, loser, text_sample, timestamp, metadata_json in votes:
+        try:
+            metadata = json.loads(metadata_json) if metadata_json else {}
+            # Extract locale from metadata or voice
+            locale = metadata.get("locale", "Unknown")
+            if locale == "Unknown" and metadata.get("winner_voice"):
+                voice_parts = metadata.get("winner_voice", "").split("-")
+                if len(voice_parts) >= 2:
+                    locale = "-".join(voice_parts[:2])
+            
+            result = {
+                "winner": winner,
+                "loser": loser,
+                "winner_voice": metadata.get("winner_voice", ""),
+                "loser_voice": metadata.get("loser_voice", ""),
+                "text": metadata.get("text", text_sample),
+                "comment": metadata.get("comment", ""),
+                "locale": locale,
+                "falcon_won": metadata.get("falcon_won", False),
+                "user_choice": metadata.get("user_choice", ""),
+                "winner_config": metadata.get("winner_config", {}),
+                "loser_config": metadata.get("loser_config", {}),
+                "timestamp": timestamp,
+                "comparison_num": metadata.get("comparison_num", len(results) + 1)
+            }
+            results.append(result)
+        except Exception as e:
+            # Fallback for old format - try to extract locale from text_sample or skip
+            continue
+    
+    # Extract locale and calculate win rates per locale
+    locale_stats = {}
+    
+    for result in results:
+        # Use stored locale from metadata, or extract from voice
+        locale = result.get("locale", "Unknown")
+        if locale == "Unknown":
+            winner_voice = result.get("winner_voice", "")
+            if winner_voice:
+                voice_parts = winner_voice.split("-")
+                if len(voice_parts) >= 2:
+                    locale = "-".join(voice_parts[:2])
+        
+        # Initialize locale stats if not exists
+        if locale not in locale_stats:
+            locale_stats[locale] = {
+                "falcon_wins": 0,
+                "zeroshot_wins": 0,
+                "total": 0
+            }
+        
+        # Count wins
+        locale_stats[locale]["total"] += 1
+        if result["winner"] == "murf_falcon_oct23":
+            locale_stats[locale]["falcon_wins"] += 1
+        elif result["winner"] == "murf_zeroshot":
+            locale_stats[locale]["zeroshot_wins"] += 1
+    
+    # Create summary table
+    locale_data = []
+    for locale, stats in sorted(locale_stats.items()):
+        total = stats["total"]
+        falcon_wins = stats["falcon_wins"]
+        zeroshot_wins = stats["zeroshot_wins"]
+        falcon_win_rate = (falcon_wins / total * 100) if total > 0 else 0
+        zeroshot_win_rate = (zeroshot_wins / total * 100) if total > 0 else 0
+        
+        locale_data.append({
+            "Locale": locale,
+            "Falcon Wins": falcon_wins,
+            "Zeroshot Wins": zeroshot_wins,
+            "Total Comparisons": total,
+            "Falcon Win Rate": f"{falcon_win_rate:.1f}%",
+            "Zeroshot Win Rate": f"{zeroshot_win_rate:.1f}%"
+        })
+    
+    if locale_data:
+        # Create DataFrame for visualizations
+        locale_df = pd.DataFrame(locale_data)
+        
+        # Prepare data for bar charts
+        locales = [item["Locale"] for item in locale_data]
+        falcon_wins_list = [item["Falcon Wins"] for item in locale_data]
+        zeroshot_wins_list = [item["Zeroshot Wins"] for item in locale_data]
+        falcon_win_rates = [float(item["Falcon Win Rate"].replace("%", "")) for item in locale_data]
+        zeroshot_win_rates = [float(item["Zeroshot Win Rate"].replace("%", "")) for item in locale_data]
+        
+        # Prepare data for grouped bar chart with win rates
+        wins_chart_data = []
+        for i, locale in enumerate(locales):
+            wins_chart_data.append({
+                "Locale": locale, 
+                "Model": "Falcon", 
+                "Wins": falcon_wins_list[i],
+                "Win Rate": falcon_win_rates[i]
+            })
+            wins_chart_data.append({
+                "Locale": locale, 
+                "Model": "Zeroshot", 
+                "Wins": zeroshot_wins_list[i],
+                "Win Rate": zeroshot_win_rates[i]
+            })
+        
+        wins_chart_df = pd.DataFrame(wins_chart_data)
+        
+        # Bar chart: Total Wins by Locale with Win Rate labels
+        fig_wins = px.bar(
+            wins_chart_df,
+            x="Locale",
+            y="Wins",
+            color="Model",
+            barmode='group',
+            labels={'Wins': 'Number of Wins', 'Locale': 'Locale'},
+            title='Total Wins by Locale (Falcon vs Zeroshot)',
+            color_discrete_map={"Falcon": '#6642B3', "Zeroshot": '#42B366'},
+            text=[f"{row['Wins']} ({row['Win Rate']:.1f}%)" for _, row in wins_chart_df.iterrows()]
+        )
+        fig_wins.update_traces(textposition='outside')
+        fig_wins.update_layout(
+            legend=dict(title="Model"),
+            xaxis_title="Locale",
+            yaxis_title="Number of Wins",
+            height=400
+        )
+        st.plotly_chart(fig_wins, use_container_width=True)
+        
+        # Data table
+        st.markdown("#### Detailed Data")
+        st.dataframe(locale_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No locale data available")
+    
+    # Overall summary metrics
+    st.markdown("---")
+    st.markdown("### Overall Summary")
+    falcon_wins = sum(1 for r in results if r["winner"] == "murf_falcon_oct23")
+    zeroshot_wins = sum(1 for r in results if r["winner"] == "murf_zeroshot")
+    total = len(results)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Murf Falcon Wins", falcon_wins, f"{falcon_wins/total*100:.1f}%")
+    with col2:
+        st.metric("Murf Zeroshot Wins", zeroshot_wins, f"{zeroshot_wins/total*100:.1f}%")
 
 def display_blind_test_2_setup(configured_providers: List[str]):
     """Display the blind test 2 setup page"""
@@ -3225,6 +3386,34 @@ def handle_fvs_vote(choice: str, pair: dict):
         st.session_state.fvs_test_start_time = datetime.now()
     test_timestamp = st.session_state.fvs_test_start_time
     
+    # Extract locale from voice names
+    winner_voice_parts = winner_voice.split("-") if winner_voice else []
+    locale = "-".join(winner_voice_parts[:2]) if len(winner_voice_parts) >= 2 else "Unknown"
+    
+    # Save to database for persistence (like leaderboard)
+    metadata = {
+        "vote_source": "falcon_vs_zeroshot",
+        "winner_voice": winner_voice,
+        "loser_voice": loser_voice,
+        "locale": locale,
+        "text": pair["text"],
+        "comment": comment,
+        "winner_config": winner_config,
+        "loser_config": loser_config,
+        "falcon_won": (pair["falcon_is"] == choice),
+        "user_choice": choice,
+        "comparison_num": current_comparison + 1
+    }
+    
+    db.save_user_vote(
+        winner_provider,
+        loser_provider,
+        pair["text"][:100],  # text_sample field
+        session_id=f"fvs_{current_comparison}",
+        vote_type="falcon_vs_zeroshot",
+        metadata=metadata
+    )
+    
     # Record result (NO ELO UPDATE - this is the key difference)
     result_record = {
         "comparison_num": current_comparison + 1,
@@ -3238,7 +3427,8 @@ def handle_fvs_vote(choice: str, pair: dict):
         "comment": comment,
         "winner_config": winner_config,
         "loser_config": loser_config,
-        "test_timestamp": test_timestamp
+        "test_timestamp": test_timestamp,
+        "locale": locale
     }
     st.session_state.fvs_results_history.append(result_record)
     
