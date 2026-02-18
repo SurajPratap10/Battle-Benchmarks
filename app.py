@@ -3704,15 +3704,15 @@ def display_fvs_final_results():
             "Comparison": result["comparison_num"],
             "Winner": "Murf Falcon" if result["winner"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Winner Voice": result["winner_voice"],
-            "Endpoint 1": winner_endpoint,
-            "Model Name 1": winner_model,
             "Loser": "Murf Falcon" if result["loser"] == "murf_falcon_oct23" else "Murf Zeroshot",
             "Loser Voice": result["loser_voice"],
-            "Endpoint 2": loser_endpoint,
-            "Model Name 2": loser_model,
             "Text": result["text"],
-            "Test Timestamp": timestamp_str,
-            "Comment": comment if comment else '-'
+            "Comment": comment if comment else '-',
+            "Winner Endpoint": winner_endpoint,
+            "Winner Model": winner_model,
+            "Loser Endpoint": loser_endpoint,
+            "Loser Model": loser_model,
+            "Test Timestamp": timestamp_str
         })
     
     df = pd.DataFrame(comparison_data)
