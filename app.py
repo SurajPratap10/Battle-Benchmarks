@@ -1109,7 +1109,7 @@ Hello, how can I assist you today with your account inquiry?""",
 
 def display_blind_test_setup(configured_providers: List[str]):
     """Display the blind test setup page"""
-    from config import get_voices_by_gender, get_voice_gender
+    from config import get_voices_by_gender, get_voice_gender, get_voices_by_gender_and_locale
     import random
     
     # Get Murf providers and other providers
@@ -1121,10 +1121,34 @@ def display_blind_test_setup(configured_providers: List[str]):
     with col1:
         st.markdown("**1. Select Competitor**")
         
-        # Create dropdown options for competitors
+        # Create dropdown options for competitors (including Murf providers)
         competitor_options = []
         competitor_ids = []
-        for provider_id in other_providers:
+        
+        # Add first non-Murf provider (if any)
+        if other_providers:
+            first_provider_id = other_providers[0]
+            provider_name = TTS_PROVIDERS[first_provider_id].name
+            model_name = TTS_PROVIDERS[first_provider_id].model_name
+            competitor_options.append(f"{provider_name} ({model_name})")
+            competitor_ids.append(first_provider_id)
+        
+        # Add Murf providers (Falcon and Zeroshot) as 2nd and 3rd options
+        for provider_id in murf_providers:
+            provider_name = TTS_PROVIDERS[provider_id].name
+            model_name = TTS_PROVIDERS[provider_id].model_name
+            # Show "Murf Falcon" instead of just "Murf"
+            if provider_id == "murf_falcon_oct23":
+                display_name = "Murf Falcon"
+            elif provider_id == "murf_zeroshot":
+                display_name = "Murf Zeroshot"
+            else:
+                display_name = provider_name
+            competitor_options.append(f"{display_name} ({model_name})")
+            competitor_ids.append(provider_id)
+        
+        # Add remaining non-Murf providers (skip first one already added)
+        for provider_id in other_providers[1:]:
             provider_name = TTS_PROVIDERS[provider_id].name
             model_name = TTS_PROVIDERS[provider_id].model_name
             competitor_options.append(f"{provider_name} ({model_name})")
@@ -1210,7 +1234,8 @@ def display_blind_test_setup(configured_providers: List[str]):
                     st.session_state.blind_test_murf_voice = filtered_voices_new[0][0]
                 selected_gender = new_gender
             
-            # Filter voices by selected gender
+            # Filter voices by selected gender only (show ALL locales in voice selector)
+            # Locale filtering will only apply during comparison generation, not in the selector
             filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == selected_gender]
             
             # Initialize voice if not set or if current voice is not valid for selected gender
@@ -1218,7 +1243,7 @@ def display_blind_test_setup(configured_providers: List[str]):
                 if filtered_voices:
                     st.session_state.blind_test_murf_voice = filtered_voices[0][0]
             elif st.session_state.blind_test_murf_voice not in [v for v, _ in filtered_voices]:
-                # Current voice doesn't match gender, reset to first voice of current gender
+                # Current voice doesn't match gender/locale, reset to first voice of current gender/locale
                 if filtered_voices:
                     st.session_state.blind_test_murf_voice = filtered_voices[0][0]
             
@@ -1272,7 +1297,7 @@ def display_blind_test_setup(configured_providers: List[str]):
                     if voice_info:
                         selected_names.append(voice_info.name)
                 if selected_names:
-                    st.caption(f"Selected: **{', '.join(selected_names)}** • Will shuffle during comparisons • Will compare with {selected_gender} voices")
+                    st.caption(f"Selected: **{', '.join(selected_names)}** • Will shuffle during comparisons and compare with {selected_gender} voices")
         else:
             st.warning("No Murf provider configured")
     
@@ -1728,9 +1753,16 @@ def generate_next_comparison_2():
     # Get locale filter from setup
     locale_filter = st.session_state.get("blind_test_2_locale_filter", "US")
     
-    # Get voices for competitor A matching gender AND locale
+    # Check if competitors are Murf - apply locale filter only to Murf
+    is_competitor_a_murf = "murf" in competitor_a_id.lower()
+    is_competitor_b_murf = "murf" in competitor_b_id.lower()
+    
+    # Get voices for competitor A matching gender AND locale (only if Murf)
     from config import get_voices_by_gender_and_locale, get_voices_by_gender
-    competitor_a_voices = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
+    if is_competitor_a_murf:
+        competitor_a_voices = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
+    else:
+        competitor_a_voices = get_voices_by_gender(competitor_a_id, gender_filter)
     if competitor_a_id in TTS_PROVIDERS:
         supported_voices_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
         competitor_a_voices = [v for v in competitor_a_voices if v in supported_voices_set]
@@ -1740,11 +1772,14 @@ def generate_next_comparison_2():
         try:
             provider_obj = TTSProviderFactory.create_provider(competitor_a_id)
             if hasattr(provider_obj, 'voice_id_map'):
-                # Get completely fresh gender+locale-filtered list
-                fresh_a = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
+                # Get completely fresh gender-filtered list (locale only if Murf)
+                if is_competitor_a_murf:
+                    fresh_a = get_voices_by_gender_and_locale(competitor_a_id, gender_filter, locale_filter)
+                else:
+                    fresh_a = get_voices_by_gender(competitor_a_id, gender_filter)
                 if competitor_a_id in TTS_PROVIDERS:
                     supported_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
-                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender, 4) correct locale
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
                     competitor_a_voices = [
                         v for v in fresh_a 
                         if v in supported_set and 
@@ -1752,12 +1787,13 @@ def generate_next_comparison_2():
                         TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and
                         TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter
                     ]
-                    # Additional locale check
-                    competitor_a_voices = [
-                        v for v in competitor_a_voices
-                        if locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)
-                    ]
-                    print(f"[CARTESIA PRE-FILTER] Competitor A: Filtered to {len(competitor_a_voices)} {gender_filter} {locale_filter} voices")
+                    # Additional locale check only if Murf
+                    if is_competitor_a_murf:
+                        competitor_a_voices = [
+                            v for v in competitor_a_voices
+                            if locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)
+                        ]
+                    print(f"[CARTESIA PRE-FILTER] Competitor A: Filtered to {len(competitor_a_voices)} {gender_filter} {' ' + locale_filter if is_competitor_a_murf else ''} voices")
         except Exception as e:
             print(f"Warning: Could not pre-filter Cartesia voices for A: {e}")
     
@@ -1765,12 +1801,19 @@ def generate_next_comparison_2():
     if not competitor_a_voices and competitor_a_id in TTS_PROVIDERS:
         competitor_a_voice_info = TTS_PROVIDERS[competitor_a_id].voice_info
         supported_voices_set = set(TTS_PROVIDERS[competitor_a_id].supported_voices)
-        competitor_a_voices = [
-            v for v, info in competitor_a_voice_info.items() 
-            if info.gender == gender_filter and 
-            v in supported_voices_set and
-            locale_filter == "US" and (info.accent == "US" or "en-US" in v)
-        ]
+        if is_competitor_a_murf:
+            competitor_a_voices = [
+                v for v, info in competitor_a_voice_info.items() 
+                if info.gender == gender_filter and 
+                v in supported_voices_set and
+                locale_filter == "US" and (info.accent == "US" or "en-US" in v)
+            ]
+        else:
+            competitor_a_voices = [
+                v for v, info in competitor_a_voice_info.items() 
+                if info.gender == gender_filter and 
+                v in supported_voices_set
+            ]
     
     if not competitor_a_voices:
         locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
@@ -1778,8 +1821,11 @@ def generate_next_comparison_2():
         st.session_state.blind_test_2_current_pair = None
         return
     
-    # Get voices for competitor B matching gender AND locale
-    competitor_b_voices = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
+    # Get voices for competitor B matching gender AND locale (only if Murf)
+    if is_competitor_b_murf:
+        competitor_b_voices = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
+    else:
+        competitor_b_voices = get_voices_by_gender(competitor_b_id, gender_filter)
     if competitor_b_id in TTS_PROVIDERS:
         supported_voices_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
         competitor_b_voices = [v for v in competitor_b_voices if v in supported_voices_set]
@@ -1789,11 +1835,14 @@ def generate_next_comparison_2():
         try:
             provider_obj = TTSProviderFactory.create_provider(competitor_b_id)
             if hasattr(provider_obj, 'voice_id_map'):
-                # Get completely fresh gender+locale-filtered list
-                fresh_b = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
+                # Get completely fresh gender-filtered list (locale only if Murf)
+                if is_competitor_b_murf:
+                    fresh_b = get_voices_by_gender_and_locale(competitor_b_id, gender_filter, locale_filter)
+                else:
+                    fresh_b = get_voices_by_gender(competitor_b_id, gender_filter)
                 if competitor_b_id in TTS_PROVIDERS:
                     supported_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
-                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender, 4) correct locale
+                    # Only use voices that are: 1) in voice_id_map, 2) supported, 3) correct gender
                     competitor_b_voices = [
                         v for v in fresh_b 
                         if v in supported_set and 
@@ -1801,14 +1850,15 @@ def generate_next_comparison_2():
                         TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and
                         TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter
                     ]
-                    # Additional locale check
-                    competitor_b_voices = [
-                        v for v in competitor_b_voices
-                        if (locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)) or
-                           (locale_filter == "IN" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
-                           (locale_filter == "HI" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "HI" or "hi-IN" in v))
-                    ]
-                    print(f"[CARTESIA PRE-FILTER] Competitor B: Filtered to {len(competitor_b_voices)} {gender_filter} {locale_filter} voices")
+                    # Additional locale check only if Murf
+                    if is_competitor_b_murf:
+                        competitor_b_voices = [
+                            v for v in competitor_b_voices
+                            if (locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)) or
+                               (locale_filter == "IN" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
+                               (locale_filter == "HI" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "HI" or "hi-IN" in v))
+                        ]
+                    print(f"[CARTESIA PRE-FILTER] Competitor B: Filtered to {len(competitor_b_voices)} {gender_filter} {' ' + locale_filter if is_competitor_b_murf else ''} voices")
         except Exception as e:
             print(f"Warning: Could not pre-filter Cartesia voices for B: {e}")
     
@@ -1816,12 +1866,19 @@ def generate_next_comparison_2():
     if not competitor_b_voices and competitor_b_id in TTS_PROVIDERS:
         competitor_b_voice_info = TTS_PROVIDERS[competitor_b_id].voice_info
         supported_voices_set = set(TTS_PROVIDERS[competitor_b_id].supported_voices)
-        competitor_b_voices = [
-            v for v, info in competitor_b_voice_info.items() 
-            if info.gender == gender_filter and 
-            v in supported_voices_set and
-            locale_filter == "US" and (info.accent == "US" or "en-US" in v)
-        ]
+        if is_competitor_b_murf:
+            competitor_b_voices = [
+                v for v, info in competitor_b_voice_info.items() 
+                if info.gender == gender_filter and 
+                v in supported_voices_set and
+                locale_filter == "US" and (info.accent == "US" or "en-US" in v)
+            ]
+        else:
+            competitor_b_voices = [
+                v for v, info in competitor_b_voice_info.items() 
+                if info.gender == gender_filter and 
+                v in supported_voices_set
+            ]
     
     if not competitor_b_voices:
         locale_display = {"US": "US English"}.get(locale_filter, locale_filter)
@@ -1831,15 +1888,20 @@ def generate_next_comparison_2():
     
     # CRITICAL: Re-verify voice lists contain ONLY correct gender AND locale voices before selection
     # This is especially important for Cartesia
+    # Apply locale filter only if competitor is Murf
     competitor_a_voices = [v for v in competitor_a_voices 
                           if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
                           TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter and
-                          locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)
+                          (not is_competitor_a_murf or (
+                              locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)
+                          ))
                           ]
     competitor_b_voices = [v for v in competitor_b_voices 
                           if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
                           TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter and
-                          locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)
+                          (not is_competitor_b_murf or (
+                              locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)
+                          ))
                           ]
     
     if not competitor_a_voices:
@@ -1854,22 +1916,26 @@ def generate_next_comparison_2():
         st.session_state.blind_test_2_current_pair = None
         return
     
-    # CRITICAL: One final filter to ensure ONLY correct gender AND locale voices remain
+    # CRITICAL: One final filter to ensure ONLY correct gender AND locale voices remain (only if Murf)
     competitor_a_voices = [
         v for v in competitor_a_voices 
         if TTS_PROVIDERS[competitor_a_id].voice_info.get(v) and 
         TTS_PROVIDERS[competitor_a_id].voice_info[v].gender == gender_filter and
-        ((locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)) or
-         (locale_filter == "IN" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
-         (locale_filter == "HI" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "HI" or "hi-IN" in v)))
+        (not is_competitor_a_murf or (
+            (locale_filter == "US" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "US" or "en-US" in v)) or
+            (locale_filter == "IN" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
+            (locale_filter == "HI" and (TTS_PROVIDERS[competitor_a_id].voice_info[v].accent == "HI" or "hi-IN" in v))
+        ))
     ]
     competitor_b_voices = [
         v for v in competitor_b_voices 
         if TTS_PROVIDERS[competitor_b_id].voice_info.get(v) and 
         TTS_PROVIDERS[competitor_b_id].voice_info[v].gender == gender_filter and
-        ((locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)) or
-         (locale_filter == "IN" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
-         (locale_filter == "HI" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "HI" or "hi-IN" in v)))
+        (not is_competitor_b_murf or (
+            (locale_filter == "US" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "US" or "en-US" in v)) or
+            (locale_filter == "IN" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "IN" or "en-IN" in v)) or
+            (locale_filter == "HI" and (TTS_PROVIDERS[competitor_b_id].voice_info[v].accent == "HI" or "hi-IN" in v))
+        ))
     ]
     
     if not competitor_a_voices or not competitor_b_voices:
@@ -2420,28 +2486,120 @@ def generate_next_comparison():
     # Get selected MURF voices (up to 4)
     selected_murf_voices = st.session_state.blind_test_murf_voices if st.session_state.blind_test_murf_voices else []
     
+    # Check if Murf is selected as competitor - if so, extract locale from selected voices
+    competitor_id = st.session_state.blind_test_selected_competitors[0] if st.session_state.blind_test_selected_competitors else None
+    is_murf_competitor = competitor_id and "murf" in competitor_id.lower()
+    
+    # Extract locale from selected Murf voices if Murf is competitor
+    locale_filter = None
+    if is_murf_competitor and selected_murf_voices:
+        # Extract locale from first selected voice
+        first_voice = selected_murf_voices[0]
+        if "en-US" in first_voice or "en-us" in first_voice.lower():
+            locale_filter = "US"
+        elif "en-IN" in first_voice or "en-in" in first_voice.lower():
+            locale_filter = "IN"
+        elif "hi-IN" in first_voice or "hi-in" in first_voice.lower():
+            locale_filter = "HI"
+    
     # If no voices selected, fall back to single voice or get first voice of selected gender
     if not selected_murf_voices:
         murf_voice = st.session_state.blind_test_murf_voice
         if not murf_voice or murf_voice not in TTS_PROVIDERS[murf_provider_id].supported_voices:
             murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
             filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
+            # Apply locale filter if Murf is competitor and locale is extracted
+            if is_murf_competitor and locale_filter:
+                filtered_voices = [
+                    (v, info) for v, info in filtered_voices
+                    if (locale_filter == "US" and (info.accent == "US" or "en-US" in v or "en-US" in v.lower())) or
+                       (locale_filter == "IN" and (info.accent == "IN" or "en-IN" in v or "en-IN" in v.lower())) or
+                       (locale_filter == "HI" and (info.accent == "HI" or "hi-IN" in v or "hi-IN" in v.lower()))
+                ]
             if filtered_voices:
                 murf_voice = filtered_voices[0][0]
                 st.session_state.blind_test_murf_voice = murf_voice
                 selected_murf_voices = [murf_voice]
+        # Filter selected voices by locale if Murf is competitor and locale is extracted
+        if is_murf_competitor and selected_murf_voices and locale_filter:
+            murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+            selected_murf_voices = [
+                v for v in selected_murf_voices
+                if v in TTS_PROVIDERS[murf_provider_id].supported_voices and
+                murf_voice_info.get(v) and
+                murf_voice_info[v].gender == gender_filter and
+                ((locale_filter == "US" and (murf_voice_info[v].accent == "US" or "en-US" in v or "en-US" in v.lower())) or
+                 (locale_filter == "IN" and (murf_voice_info[v].accent == "IN" or "en-IN" in v or "en-IN" in v.lower())) or
+                 (locale_filter == "HI" and (murf_voice_info[v].accent == "HI" or "hi-IN" in v or "hi-IN" in v.lower())))
+            ]
+            if selected_murf_voices:
+                murf_voice = selected_murf_voices[0]
+                st.session_state.blind_test_murf_voice = murf_voice
         voice_index = 0  # Only one voice selected
     else:
+        # Filter selected voices by locale if Murf is competitor and locale is extracted
+        if is_murf_competitor and locale_filter:
+            murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+            selected_murf_voices = [
+                v for v in selected_murf_voices
+                if v in TTS_PROVIDERS[murf_provider_id].supported_voices and
+                murf_voice_info.get(v) and
+                murf_voice_info[v].gender == gender_filter and
+                ((locale_filter == "US" and (murf_voice_info[v].accent == "US" or "en-US" in v or "en-US" in v.lower())) or
+                 (locale_filter == "IN" and (murf_voice_info[v].accent == "IN" or "en-IN" in v or "en-IN" in v.lower())) or
+                 (locale_filter == "HI" and (murf_voice_info[v].accent == "HI" or "hi-IN" in v or "hi-IN" in v.lower())))
+            ]
+            # Update session state with filtered voices
+            if selected_murf_voices:
+                st.session_state.blind_test_murf_voices = selected_murf_voices
+            else:
+                # If no voices match locale, get first voice matching gender and locale
+                murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+                filtered_voices = [
+                    (v, info) for v, info in murf_voice_info.items()
+                    if info.gender == gender_filter and
+                    ((locale_filter == "US" and (info.accent == "US" or "en-US" in v or "en-US" in v.lower())) or
+                     (locale_filter == "IN" and (info.accent == "IN" or "en-IN" in v or "en-IN" in v.lower())) or
+                     (locale_filter == "HI" and (info.accent == "HI" or "hi-IN" in v or "hi-IN" in v.lower())))
+                ]
+                if filtered_voices:
+                    selected_murf_voices = [filtered_voices[0][0]]
+                    st.session_state.blind_test_murf_voices = selected_murf_voices
+        
         # Cycle through selected voices based on comparison count
         # Use modulo to cycle through the list
-        voice_index = comparison_index % len(selected_murf_voices)
-        murf_voice = selected_murf_voices[voice_index]
+        if selected_murf_voices:
+            voice_index = comparison_index % len(selected_murf_voices)
+            murf_voice = selected_murf_voices[voice_index]
+        else:
+            # Fallback if no voices match
+            murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
+            filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
+            if is_murf_competitor:
+                filtered_voices = [
+                    (v, info) for v, info in filtered_voices
+                    if locale_filter == "US" and (info.accent == "US" or "en-US" in v or "en-US" in v.lower())
+                ]
+            if filtered_voices:
+                murf_voice = filtered_voices[0][0]
+                selected_murf_voices = [murf_voice]
+                st.session_state.blind_test_murf_voices = selected_murf_voices
+                voice_index = 0
+            else:
+                st.error(f"No {gender_filter} voices available for Murf with locale {locale_filter}")
+                st.session_state.blind_test_current_pair = None
+                return
         
         # Ensure selected voice is still valid
         if murf_voice not in TTS_PROVIDERS[murf_provider_id].supported_voices:
             # Voice is invalid, filter and use first valid one
             murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info
             filtered_voices = [(v, info) for v, info in murf_voice_info.items() if info.gender == gender_filter]
+            if is_murf_competitor:
+                filtered_voices = [
+                    (v, info) for v, info in filtered_voices
+                    if locale_filter == "US" and (info.accent == "US" or "en-US" in v or "en-US" in v.lower())
+                ]
             valid_voice_ids = [v for v in selected_murf_voices if v in TTS_PROVIDERS[murf_provider_id].supported_voices]
             if valid_voice_ids:
                 voice_index = comparison_index % len(valid_voice_ids)
@@ -2462,6 +2620,9 @@ def generate_next_comparison():
     
     competitor_id = competitors[0]  # Single competitor selected
     
+    # Check if competitor is Murf
+    is_murf_competitor = "murf" in competitor_id.lower()
+    
     # Get a voice with matching gender from competitor - MUST MATCH GENDER
     # Get the actual gender of the selected Murf voice to ensure perfect match
     murf_voice_info = TTS_PROVIDERS[murf_provider_id].voice_info.get(murf_voice)
@@ -2473,9 +2634,14 @@ def generate_next_comparison():
     else:
         print(f"[GENDER DEBUG] WARNING: Could not find Murf voice info for {murf_voice}, using filter: {gender_filter}")
     
-    # Get competitor voices matching gender - ensure they're in supported_voices too
-    competitor_voices = get_voices_by_gender(competitor_id, gender_filter)
-    print(f"[GENDER DEBUG] Competitor {competitor_id} voices matching '{gender_filter}': {competitor_voices}")
+    # Get competitor voices matching gender - apply locale filter if competitor is Murf and locale is extracted
+    if is_murf_competitor and locale_filter:
+        from config import get_voices_by_gender_and_locale
+        competitor_voices = get_voices_by_gender_and_locale(competitor_id, gender_filter, locale_filter)
+        print(f"[GENDER DEBUG] Competitor {competitor_id} voices matching '{gender_filter}' and locale '{locale_filter}': {competitor_voices}")
+    else:
+        competitor_voices = get_voices_by_gender(competitor_id, gender_filter)
+        print(f"[GENDER DEBUG] Competitor {competitor_id} voices matching '{gender_filter}': {competitor_voices}")
     
     # Additional validation: ensure voices are in supported_voices list
     if competitor_id in TTS_PROVIDERS:
@@ -2512,33 +2678,71 @@ def generate_next_comparison():
             if info.gender == gender_filter and v in supported_voices_set
         ]
     
-    # If still no voices, this is an error - competitor doesn't have voices of this gender
-    if not competitor_voices:
+    # If both competitor and Murf provider are Murf, use same selected voices for both (skip random selection)
+    if is_murf_competitor and murf_provider_id and "murf" in murf_provider_id.lower():
+        # Use the same selected voices for competitor (same as Murf provider)
+        # Cycle through selected voices using comparison index
+        if selected_murf_voices:
+            competitor_voice_index = comparison_index % len(selected_murf_voices)
+            competitor_voice = selected_murf_voices[competitor_voice_index]
+            print(f"[MURF VS MURF] Using same voice for both: {competitor_voice} (voice {competitor_voice_index + 1} of {len(selected_murf_voices)})")
+            
+            # Verify the voice is valid for competitor
+            if competitor_voice not in TTS_PROVIDERS[competitor_id].supported_voices:
+                st.error(f"Selected voice {competitor_voice} not available for {TTS_PROVIDERS[competitor_id].name}")
+                st.session_state.blind_test_current_pair = None
+                return
+        else:
+            st.error("No Murf voices selected")
+            st.session_state.blind_test_current_pair = None
+            return
+    elif not competitor_voices:
+        # Only show error if not Murf vs Murf (we already handled that case above)
         st.error(f"Competitor {TTS_PROVIDERS[competitor_id].name} doesn't have any {gender_filter} voices available. Please select a different competitor.")
         st.session_state.blind_test_current_pair = None
         return
     
-    # CRITICAL: Final filter to ensure ONLY correct gender voices remain - do this MULTIPLE times
-    for _ in range(3):  # Triple filter to be absolutely sure
-        competitor_voices = [
-            v for v in competitor_voices 
-            if TTS_PROVIDERS[competitor_id].voice_info.get(v) and 
-            TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter
-        ]
-    
-    if not competitor_voices:
-        st.error(f"CRITICAL: No {gender_filter} voices available after final filtering for {TTS_PROVIDERS[competitor_id].name}")
-        st.session_state.blind_test_current_pair = None
-        return
-    
-    # Select from matching gender voices only
-    # If only 1 voice available, use it; otherwise randomly pick one
-    if len(competitor_voices) == 1:
-        competitor_voice = competitor_voices[0]
-        print(f"[GENDER DEBUG] Only 1 {gender_filter} voice available for competitor: {competitor_voice}")
-    else:
-        competitor_voice = random.choice(competitor_voices)
-        print(f"[GENDER DEBUG] Selected {gender_filter} voice for competitor: {competitor_voice} (from {len(competitor_voices)} options)")
+    # If competitor is NOT Murf, use existing random selection logic
+    if not (is_murf_competitor and murf_provider_id and "murf" in murf_provider_id.lower()):
+        # CRITICAL: Final filter to ensure ONLY correct gender voices remain - do this MULTIPLE times
+        # Also apply locale filter if competitor is Murf and locale is extracted
+        for _ in range(3):  # Triple filter to be absolutely sure
+            competitor_voices = [
+                v for v in competitor_voices 
+                if TTS_PROVIDERS[competitor_id].voice_info.get(v) and 
+                TTS_PROVIDERS[competitor_id].voice_info[v].gender == gender_filter and
+                (not is_murf_competitor or not locale_filter or (
+                    (locale_filter == "US" and (
+                        TTS_PROVIDERS[competitor_id].voice_info[v].accent == "US" or 
+                        "en-US" in v or 
+                        "en-US" in v.lower()
+                    )) or
+                    (locale_filter == "IN" and (
+                        TTS_PROVIDERS[competitor_id].voice_info[v].accent == "IN" or 
+                        "en-IN" in v or 
+                        "en-IN" in v.lower()
+                    )) or
+                    (locale_filter == "HI" and (
+                        TTS_PROVIDERS[competitor_id].voice_info[v].accent == "HI" or 
+                        "hi-IN" in v or 
+                        "hi-IN" in v.lower()
+                    ))
+                ))
+            ]
+        
+        if not competitor_voices:
+            st.error(f"CRITICAL: No {gender_filter} voices available after final filtering for {TTS_PROVIDERS[competitor_id].name}")
+            st.session_state.blind_test_current_pair = None
+            return
+        
+        # Select from matching gender voices only
+        # If only 1 voice available, use it; otherwise randomly pick one
+        if len(competitor_voices) == 1:
+            competitor_voice = competitor_voices[0]
+            print(f"[GENDER DEBUG] Only 1 {gender_filter} voice available for competitor: {competitor_voice}")
+        else:
+            competitor_voice = random.choice(competitor_voices)
+            print(f"[GENDER DEBUG] Selected {gender_filter} voice for competitor: {competitor_voice} (from {len(competitor_voices)} options)")
     
     # IMMEDIATE VERIFICATION: Double-check selected voice matches gender - if wrong, force correct
     selected_voice_check = TTS_PROVIDERS[competitor_id].voice_info.get(competitor_voice)
