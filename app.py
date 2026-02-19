@@ -9,11 +9,17 @@ import plotly.express as px
 import json
 import base64
 import time 
+import os
 from datetime import datetime
 from typing import Dict, List, Any
 
 from dotenv import load_dotenv
 load_dotenv()
+
+try:
+    import openai
+except ImportError:
+    openai = None
 
 from config import TTS_PROVIDERS, UI_CONFIG, validate_config
 from dataset import DatasetGenerator, TestSample
@@ -248,7 +254,7 @@ def main():
         
         st.subheader("Navigator")
         
-        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Falcon vs Zeroshot", "Results (Falcon vs 0shot)", "Quick Test"]
+        pages = ["Ranked Blind Test", "Leaderboard", "Unranked Blind Test", "Falcon vs Zeroshot", "Results (Falcon vs 0shot)", "Comments (Falcon vs 0shot)", "Quick Test"]
         
         for i, page_name in enumerate(pages):
             if st.button(page_name, key=f"nav_{page_name}", use_container_width=True):
@@ -308,6 +314,8 @@ def main():
         falcon_vs_zeroshot_page()
     elif page == "Results (Falcon vs 0shot)":
         fvs_results_page()
+    elif page == "Comments (Falcon vs 0shot)":
+        fvs_comments_page()
     elif page == "Leaderboard":
         leaderboard_page()
 
@@ -922,6 +930,214 @@ def fvs_results_page():
         st.metric("Murf Falcon Wins", falcon_wins, f"{falcon_wins/total*100:.1f}%")
     with col2:
         st.metric("Murf Zeroshot Wins", zeroshot_wins, f"{zeroshot_wins/total*100:.1f}%")
+
+def fvs_comments_page():
+    """Display all comments from Falcon vs Zeroshot tests, grouped by locale, with ChatGPT summaries"""
+    st.header("Comments (Falcon vs 0shot)")
+    st.markdown("All comments from Falcon vs Zeroshot tests, organized by locale")
+    
+    # Get results from database
+    votes = db.get_fvs_votes()
+    
+    if not votes:
+        st.info("No comments available. Complete a Falcon vs Zeroshot test to see comments.")
+        return
+    
+    # Parse votes and group comments by locale
+    locale_comments = {}
+    
+    for winner, loser, text_sample, timestamp, metadata_json in votes:
+        try:
+            metadata = json.loads(metadata_json) if metadata_json else {}
+            comment = metadata.get("comment", "").strip()
+            
+            # Skip if no comment
+            if not comment:
+                continue
+            
+            # Extract locale from metadata or voice
+            locale = metadata.get("locale", "Unknown")
+            if locale == "Unknown" and metadata.get("winner_voice"):
+                voice_parts = metadata.get("winner_voice", "").split("-")
+                if len(voice_parts) >= 2:
+                    locale = "-".join(voice_parts[:2])
+            
+            # Initialize locale if not exists
+            if locale not in locale_comments:
+                locale_comments[locale] = []
+            
+            # Add comment with metadata
+            locale_comments[locale].append({
+                "comment": comment,
+                "text": metadata.get("text", text_sample),
+                "winner": "Murf Falcon" if winner == "murf_falcon_oct23" else "Murf Zeroshot",
+                "loser": "Murf Falcon" if loser == "murf_falcon_oct23" else "Murf Zeroshot",
+                "timestamp": timestamp,
+                "winner_voice": metadata.get("winner_voice", ""),
+                "loser_voice": metadata.get("loser_voice", "")
+            })
+        except Exception as e:
+            continue
+    
+    if not locale_comments:
+        st.info("No comments found in the database.")
+        return
+    
+    # Sort locales alphabetically
+    sorted_locales = sorted(locale_comments.keys())
+    
+    # Initialize selected locale in session state
+    if "fvs_selected_locale" not in st.session_state:
+        st.session_state.fvs_selected_locale = sorted_locales[0] if sorted_locales else None
+    
+    # Simple dropdown to select locale
+    # Create dropdown options with comment counts
+    locale_options = {f"{locale} ({len(locale_comments[locale])})": locale for locale in sorted_locales}
+    
+    selected_label = None
+    for label, locale in locale_options.items():
+        if locale == st.session_state.fvs_selected_locale:
+            selected_label = label
+            break
+    
+    selected_label = st.selectbox(
+        "Select Locale:",
+        options=list(locale_options.keys()),
+        index=list(locale_options.keys()).index(selected_label) if selected_label else 0,
+        key="fvs_locale_dropdown"
+    )
+    
+    selected_locale = locale_options[selected_label]
+    st.session_state.fvs_selected_locale = selected_locale
+    
+    # Display table for selected locale
+    if selected_locale and selected_locale in locale_comments:
+        comments = locale_comments[selected_locale]
+        st.markdown(f"### {selected_locale} - {len(comments)} comment{'s' if len(comments) != 1 else ''}")
+        
+        # Prepare data for table
+        table_data = []
+        for comment_idx, comment_data in enumerate(comments, 1):
+            timestamp_str = comment_data.get('timestamp', '')
+            if timestamp_str:
+                if isinstance(timestamp_str, str):
+                    formatted_timestamp = timestamp_str
+                else:
+                    formatted_timestamp = timestamp_str.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                formatted_timestamp = '-'
+            
+            table_data.append({
+                "#": comment_idx,
+                "Winner": comment_data['winner'],
+                "Loser": comment_data['loser'],
+                "Winner Voice": comment_data.get('winner_voice', '-'),
+                "Loser Voice": comment_data.get('loser_voice', '-'),
+                "Text": comment_data['text'][:100] + "..." if len(comment_data['text']) > 100 else comment_data['text'],
+                "Comment": comment_data['comment'],
+                "Timestamp": formatted_timestamp
+            })
+        
+        # Display as table
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Summary section using ChatGPT
+    st.markdown("---")
+    
+    # Add blinking red "Coming Soon!" label aligned to the right
+    st.markdown("""
+    <style>
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    .summary-header-container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    .coming-soon-label {
+        display: inline-block;
+        background-color: #ff0000;
+        color: white;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: bold;
+        font-size: 14px;
+        animation: blink 2s infinite;
+    }
+    </style>
+    <div class="summary-header-container">
+        <h2>Summary of Comments</h2>
+        <span class="coming-soon-label">Coming Soon!</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("AI-generated summaries of comments for each locale")
+    
+    # Summary feature coming soon - OpenAI integration disabled for now
+    # Check if OpenAI is available
+    if openai is None:
+        return
+    
+    # Check for API key
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        return
+    
+    # Initialize OpenAI client
+    try:
+        client = openai.OpenAI(api_key=openai_api_key)
+    except Exception as e:
+        return
+    
+    # Generate summaries for each locale
+    for locale in sorted_locales:
+        comments = locale_comments[locale]
+        comments_text = [c['comment'] for c in comments]
+        
+        if not comments_text:
+            continue
+        
+        st.markdown(f"### {locale} Summary")
+        
+        # Create prompt for summarization
+        comments_list = "\n".join([f"- {comment}" for comment in comments_text])
+        prompt = f"""Please provide a concise summary of the following comments about text-to-speech quality comparisons between Murf Falcon and Murf Zeroshot for the locale {locale}.
+
+Comments:
+{comments_list}
+
+Please summarize:
+1. Common themes and patterns
+2. Key strengths mentioned for each model
+3. Key weaknesses mentioned for each model
+4. Overall sentiment and preferences
+
+Keep the summary concise and actionable."""
+        
+        # Generate summary with loading indicator
+        with st.spinner(f"Generating summary for {locale}..."):
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that summarizes user feedback about text-to-speech quality comparisons."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                
+                summary = response.choices[0].message.content
+                st.markdown(summary)
+                
+            except Exception as e:
+                st.error(f"Error generating summary for {locale}: {e}")
+        
+        st.divider()
 
 def display_blind_test_2_setup(configured_providers: List[str]):
     """Display the blind test 2 setup page"""
