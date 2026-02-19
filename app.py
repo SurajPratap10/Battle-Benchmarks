@@ -4661,6 +4661,22 @@ def leaderboard_page():
     # Also include any providers that have votes (in case they're not configured anymore)
     all_providers = all_providers | set(provider_wins.keys()) | set(provider_losses.keys())
     
+    # Calculate pairwise comparison statistics
+    pairwise_stats = {}  # (provider_a, provider_b) -> {"wins_a": count, "wins_b": count, "total": count}
+    
+    for winner, loser, timestamp, metadata in votes:
+        # Normalize pair order (always use alphabetical order for consistency)
+        pair = tuple(sorted([winner, loser]))
+        if pair not in pairwise_stats:
+            pairwise_stats[pair] = {"wins_a": 0, "wins_b": 0, "total": 0}
+        
+        # Determine which provider is 'a' (first alphabetically)
+        if winner == pair[0]:
+            pairwise_stats[pair]["wins_a"] += 1
+        else:
+            pairwise_stats[pair]["wins_b"] += 1
+        pairwise_stats[pair]["total"] += 1
+    
     # Initialize all providers at default ELO of 1000
     for provider in all_providers:
         test_session_elo[provider] = 1000.0  # Default ELO for all
@@ -4711,6 +4727,9 @@ def leaderboard_page():
     
     # Create DataFrame
     df = pd.DataFrame(display_data)
+    
+    # Add header for main leaderboard table
+    st.subheader("ELO Rankings")
     
     # Add custom CSS for better styling - remove scroll, let page scroll instead
     st.markdown("""
@@ -4776,6 +4795,167 @@ def leaderboard_page():
             "Win Rate": st.column_config.TextColumn("Win Rate", width="small")
         }
     )
+    
+    # Display pairwise comparison matrix below ELO table
+    all_providers_list = sorted(list(all_providers))  # Sort for consistent ordering
+    
+    if votes and len(all_providers_list) > 1:
+        st.subheader("Pairwise Win Rate Matrix")
+        st.markdown("Win percentage and total samples for each pairwise comparison (here n is the total number of samples comparisons between two providers.)")
+        
+        # Build matrix data for DataFrame (for CSV download)
+        # Use get_provider_name_for_de_anonymization to show "Murf Falcon" instead of "Murf"
+        provider_names = [get_provider_name_for_de_anonymization(p) for p in all_providers_list]
+        matrix_data = []
+        
+        for i, row_provider in enumerate(all_providers_list):
+            row_name = get_provider_name_for_de_anonymization(row_provider)
+            row_dict = {"Provider": row_name}
+            
+            for j, col_provider in enumerate(all_providers_list):
+                col_name = get_provider_name_for_de_anonymization(col_provider)
+                if i == j:
+                    # Diagonal cell
+                    row_dict[col_name] = "—"
+                else:
+                    # Get pair stats
+                    pair = tuple(sorted([row_provider, col_provider]))
+                    if pair in pairwise_stats:
+                        stats = pairwise_stats[pair]
+                        # Determine win% from row_provider's perspective
+                        if row_provider == pair[0]:
+                            wins = stats["wins_a"]
+                        else:
+                            wins = stats["wins_b"]
+                        
+                        total = stats["total"]
+                        win_pct = (wins / total * 100) if total > 0 else 0
+                        row_dict[col_name] = f"{win_pct:.1f}% (n={total})"
+                    else:
+                        row_dict[col_name] = "—"
+            
+            matrix_data.append(row_dict)
+        
+        # Create DataFrame for download
+        matrix_df = pd.DataFrame(matrix_data)
+        
+        # Add download button
+        csv_data = matrix_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Pairwise Matrix as CSV",
+            data=csv_data,
+            file_name=f"pairwise_win_rate_matrix_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            key="download_pairwise_matrix"
+        )
+        
+        st.markdown("<br>", unsafe_allow_html=True)  # Add some spacing
+        
+        # Build HTML table string for display
+        
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+        }
+        .pairwise-matrix {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            background-color: white;
+            min-width: 1200px;
+        }
+        .pairwise-matrix th, .pairwise-matrix td {
+            padding: 12px 10px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        .pairwise-matrix th {
+            background-color: #f8f9fa;
+            color: #6c757d;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .pairwise-matrix th:first-child {
+            background-color: #f8f9fa;
+            color: #6c757d;
+            font-weight: 600;
+            text-align: left;
+            min-width: 150px;
+        }
+        .pairwise-matrix td.diagonal {
+            background-color: #000000 !important;
+            color: #000000 !important;
+            border: 1px solid #000000 !important;
+            min-width: 50px;
+            min-height: 30px;
+        }
+        .pairwise-matrix tr:hover td:not(.diagonal) {
+            background-color: #f5f5f5;
+        }
+        </style>
+        </head>
+        <body>
+        <table class="pairwise-matrix">
+        <thead>
+        <tr>
+        <th></th>
+        """
+        
+        # Add column headers
+        for provider_name in provider_names:
+            html_content += f'<th>{provider_name}</th>\n'
+        
+        html_content += """
+        </tr>
+        </thead>
+        <tbody>
+        """
+        
+        # Add rows
+        for i, row_provider in enumerate(all_providers_list):
+            row_name = get_provider_name_for_de_anonymization(row_provider)
+            html_content += f'<tr><th>{row_name}</th>\n'
+            
+            for j, col_provider in enumerate(all_providers_list):
+                if i == j:
+                    # Diagonal cell - black
+                    html_content += '<td class="diagonal" style="background-color: #000000 !important; color: #000000 !important;">&nbsp;</td>\n'
+                else:
+                    # Get pair stats
+                    pair = tuple(sorted([row_provider, col_provider]))
+                    if pair in pairwise_stats:
+                        stats = pairwise_stats[pair]
+                        # Determine win% from row_provider's perspective
+                        if row_provider == pair[0]:
+                            wins = stats["wins_a"]
+                        else:
+                            wins = stats["wins_b"]
+                        
+                        total = stats["total"]
+                        win_pct = (wins / total * 100) if total > 0 else 0
+                        html_content += f'<td>{win_pct:.1f}% (n={total})</td>\n'
+                    else:
+                        html_content += '<td>—</td>\n'
+            
+            html_content += '</tr>\n'
+        
+        html_content += """
+        </tbody>
+        </table>
+        </body>
+        </html>
+        """
+        
+        # Use components.html to render the table with increased height
+        components.html(html_content, height=800, scrolling=True)
 
 if __name__ == "__main__":
     main()
