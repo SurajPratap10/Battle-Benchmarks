@@ -1098,42 +1098,48 @@ def fvs_comments_page():
                     should_regenerate = True
             
             if should_regenerate:
-                # Create prompt for comprehensive summarization
+                # Calculate win/loss statistics for context
+                falcon_wins = sum(1 for c in locale_comments[selected_locale] if c.get('winner') == 'Murf Falcon')
+                zeroshot_wins = sum(1 for c in locale_comments[selected_locale] if c.get('winner') == 'Murf Zeroshot')
+                total_comparisons = len(locale_comments[selected_locale])
+                
+                # Create prompt for concise, actionable summarization - CRITICAL ISSUES ONLY
                 comments_list = "\n".join([f"{idx + 1}. {comment}" for idx, comment in enumerate(comments_text)])
-                prompt = f"""Analyze the following user comments about text-to-speech quality comparisons between Murf Falcon and Murf Zeroshot for the locale {selected_locale}. Provide a comprehensive, nuanced summary that captures all themes, patterns, and insights.
+                prompt = f"""Analyze user feedback comparing Murf Falcon vs Murf Zeroshot for locale {selected_locale}.
 
-Comments ({len(comments_text)} total):
+Context: {total_comparisons} comparisons | Falcon wins: {falcon_wins} | Zeroshot wins: {zeroshot_wins}
+
+Comments:
 {comments_list}
 
-Please provide a detailed analysis covering:
+Provide a BRIEF summary (max 200 words) focusing ONLY on CRITICAL issues:
 
-1. **Common Themes & Patterns**: Identify recurring topics, concerns, or observations across multiple comments. Look for patterns in what users notice or care about.
+1. **Most Critical Issues ({selected_locale})** (ranked by impact, not just frequency):
+   - Only include issues that significantly impact quality or user experience
+   - Filter out minor nitpicks and edge cases
+   - Focus on what Zeroshot needs to improve over Falcon
+   - Note frequency only if it's a critical issue (e.g., "Critical: Pronunciation errors (5x)")
 
-2. **Model-Specific Insights**:
-   - **Murf Falcon**: What are the specific strengths, weaknesses, and characteristics mentioned? Include any nuanced observations about pronunciation, naturalness, prosody, or voice quality.
-   - **Murf Zeroshot**: What are the specific strengths, weaknesses, and characteristics mentioned? Include any nuanced observations about pronunciation, naturalness, prosody, or voice quality.
+2. **Key Action Items ({selected_locale})** (top 3-5 only):
+   - What should Zeroshot prioritize improving?
+   - Rank by criticality first, then frequency
 
-3. **Comparative Analysis**: How do users compare the two models? What specific differences are highlighted? Are there particular use cases or scenarios where one model performs better?
+3. **Overall Pattern ({selected_locale})** (one sentence):
+   - Clear preference trend or balanced?
 
-4. **Technical Nuances**: Capture any specific technical details mentioned (e.g., pronunciation issues with certain words, intonation problems, pacing, accent accuracy, emotional expression).
-
-5. **Sentiment & Preferences**: What is the overall sentiment? Do users show a clear preference? Are there mixed opinions? What factors influence their preferences?
-
-6. **Actionable Insights**: What key takeaways or recommendations can be derived from these comments?
-
-Provide a thorough, well-structured summary that preserves all important nuances and themes from the comments. Be specific and cite patterns where multiple users mention similar points."""
+IMPORTANT: Ignore minor issues, nitpicks, and one-off edge cases. Only report issues that meaningfully impact quality. Be extremely selective - quality over quantity. Always include the locale name ({selected_locale}) in section headers."""
                 
                 # Generate summary with loading indicator
-                with st.spinner(f"Generating comprehensive summary for {selected_locale}..."):
+                with st.spinner(f"Generating summary for {selected_locale}..."):
                     try:
                         response = client.chat.completions.create(
                             model="gpt-4o",
                             messages=[
-                                {"role": "system", "content": "You are an expert analyst specializing in text-to-speech quality evaluation. Your summaries capture subtle nuances, identify patterns across multiple data points, and provide actionable insights. You excel at extracting meaningful themes and technical details from user feedback."},
+                                {"role": "system", "content": "You are a critical issue filter. You ONLY report the most critical, impactful issues that significantly affect quality. You ignore minor nitpicks, edge cases, and one-off complaints. Be extremely selective - focus on issues that matter. Keep it brief (max 200 words). Use bullet points."},
                                 {"role": "user", "content": prompt}
                             ],
-                            temperature=0.3,
-                            max_tokens=1500
+                            temperature=0.2,
+                            max_tokens=500
                         )
                         
                         summary = response.choices[0].message.content
