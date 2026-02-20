@@ -10,6 +10,8 @@ import json
 import base64
 import time 
 import os
+import csv
+import io
 from datetime import datetime
 from typing import Dict, List, Any
 
@@ -1045,99 +1047,197 @@ def fvs_comments_page():
     # Summary section using ChatGPT
     st.markdown("---")
     
-    # Add blinking red "Coming Soon!" label aligned to the right
-    st.markdown("""
-    <style>
-    @keyframes blink {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-    }
-    .summary-header-container {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 10px;
-    }
-    .coming-soon-label {
-        display: inline-block;
-        background-color: #ff0000;
-        color: white;
-        padding: 6px 12px;
-        border-radius: 4px;
-        font-weight: bold;
-        font-size: 14px;
-        animation: blink 2s infinite;
-    }
-    </style>
-    <div class="summary-header-container">
-        <h2>Summary of Comments</h2>
-        <span class="coming-soon-label">Coming Soon!</span>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("### Summary of Comments by LLM")
+    st.markdown("AI-generated summary of comments for the selected locale (auto-updates when new comments are added)")
     
-    st.markdown("AI-generated summaries of comments for each locale")
-    
-    # Summary feature coming soon - OpenAI integration disabled for now
     # Check if OpenAI is available
     if openai is None:
+        st.warning("OpenAI library is not installed. Please install it to use the summary feature.")
         return
     
     # Check for API key
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if not openai_api_key:
+        st.warning("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
         return
     
     # Initialize OpenAI client
     try:
         client = openai.OpenAI(api_key=openai_api_key)
     except Exception as e:
+        st.error(f"Error initializing OpenAI client: {e}")
         return
     
-    # Generate summaries for each locale
-    for locale in sorted_locales:
-        comments = locale_comments[locale]
+    # Generate summary for selected locale only
+    if selected_locale and selected_locale in locale_comments:
+        comments = locale_comments[selected_locale]
         comments_text = [c['comment'] for c in comments]
         
         if not comments_text:
-            continue
-        
-        st.markdown(f"### {locale} Summary")
-        
-        # Create prompt for summarization
-        comments_list = "\n".join([f"- {comment}" for comment in comments_text])
-        prompt = f"""Please provide a concise summary of the following comments about text-to-speech quality comparisons between Murf Falcon and Murf Zeroshot for the locale {locale}.
+            st.info(f"No comments available for {selected_locale} to summarize.")
+        else:
+            comment_count = len(comments_text)
+            
+            # Check if summary exists in database
+            stored_summary = db.get_locale_summary(selected_locale)
+            should_regenerate = True
+            summary = None
+            summary_metadata = {}
+            
+            if stored_summary:
+                stored_count = stored_summary["comment_count"]
+                # Check if comment count matches (if it changed, regenerate automatically)
+                if stored_count == comment_count:
+                    summary = stored_summary["summary"]
+                    should_regenerate = False
+                    summary_metadata = stored_summary
+                    st.success(f"Using stored summary ({stored_count} comments analyzed on {stored_summary['updated_at'][:10]})")
+                else:
+                    # Comment count changed - auto-regenerate
+                    st.info(f"New comments detected ({stored_count} → {comment_count}). Regenerating summary...")
+                    should_regenerate = True
+            
+            if should_regenerate:
+                # Create prompt for comprehensive summarization
+                comments_list = "\n".join([f"{idx + 1}. {comment}" for idx, comment in enumerate(comments_text)])
+                prompt = f"""Analyze the following user comments about text-to-speech quality comparisons between Murf Falcon and Murf Zeroshot for the locale {selected_locale}. Provide a comprehensive, nuanced summary that captures all themes, patterns, and insights.
 
-Comments:
+Comments ({len(comments_text)} total):
 {comments_list}
 
-Please summarize:
-1. Common themes and patterns
-2. Key strengths mentioned for each model
-3. Key weaknesses mentioned for each model
-4. Overall sentiment and preferences
+Please provide a detailed analysis covering:
 
-Keep the summary concise and actionable."""
-        
-        # Generate summary with loading indicator
-        with st.spinner(f"Generating summary for {locale}..."):
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that summarizes user feedback about text-to-speech quality comparisons."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=500
-                )
+1. **Common Themes & Patterns**: Identify recurring topics, concerns, or observations across multiple comments. Look for patterns in what users notice or care about.
+
+2. **Model-Specific Insights**:
+   - **Murf Falcon**: What are the specific strengths, weaknesses, and characteristics mentioned? Include any nuanced observations about pronunciation, naturalness, prosody, or voice quality.
+   - **Murf Zeroshot**: What are the specific strengths, weaknesses, and characteristics mentioned? Include any nuanced observations about pronunciation, naturalness, prosody, or voice quality.
+
+3. **Comparative Analysis**: How do users compare the two models? What specific differences are highlighted? Are there particular use cases or scenarios where one model performs better?
+
+4. **Technical Nuances**: Capture any specific technical details mentioned (e.g., pronunciation issues with certain words, intonation problems, pacing, accent accuracy, emotional expression).
+
+5. **Sentiment & Preferences**: What is the overall sentiment? Do users show a clear preference? Are there mixed opinions? What factors influence their preferences?
+
+6. **Actionable Insights**: What key takeaways or recommendations can be derived from these comments?
+
+Provide a thorough, well-structured summary that preserves all important nuances and themes from the comments. Be specific and cite patterns where multiple users mention similar points."""
                 
-                summary = response.choices[0].message.content
+                # Generate summary with loading indicator
+                with st.spinner(f"Generating comprehensive summary for {selected_locale}..."):
+                    try:
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=[
+                                {"role": "system", "content": "You are an expert analyst specializing in text-to-speech quality evaluation. Your summaries capture subtle nuances, identify patterns across multiple data points, and provide actionable insights. You excel at extracting meaningful themes and technical details from user feedback."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=0.3,
+                            max_tokens=1500
+                        )
+                        
+                        summary = response.choices[0].message.content
+                        
+                        # Save summary to database
+                        db.save_locale_summary(selected_locale, summary, comment_count, "gpt-4o")
+                        st.success("Summary generated and saved!")
+                        
+                    except Exception as e:
+                        st.error(f"Error generating summary for {selected_locale}: {e}")
+                        summary = None
+            
+            # Display summary
+            if summary:
                 st.markdown(summary)
                 
-            except Exception as e:
-                st.error(f"Error generating summary for {locale}: {e}")
-        
-        st.divider()
+                # Download and Refresh buttons
+                st.markdown("---")
+                col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+                with col2:
+                    # Refresh button - white/secondary style
+                    refresh_key = f"refresh_summary_{selected_locale}" if selected_locale else "refresh_summary"
+                    if st.button("Refresh Summary", key=refresh_key, use_container_width=True, type="secondary"):
+                        # Force regeneration by deleting stored summary
+                        if selected_locale:
+                            db.delete_locale_summary(selected_locale)
+                            # Clear any cached state and rerun
+                            st.session_state.pop(refresh_key, None)
+                            st.rerun()
+                
+                # Download buttons for different formats
+                base_filename = f"summary_{selected_locale.replace(' ', '_').replace('/', '_')}_{datetime.now().strftime('%Y%m%d')}"
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                with col3:
+                    # DOC format (formatted text) - structured with locale, model, comments, then summary
+                    doc_content = f"""SUMMARY OF COMMENTS
+
+{'='*80}
+LOCALE INFORMATION
+{'='*80}
+
+Locale: {selected_locale}
+Generated: {timestamp}
+Comment Count: {comment_count}
+Model Used: gpt-4o
+
+{'='*80}
+COMMENTS PRESENT FOR THIS LOCALE ({comment_count} total)
+{'='*80}
+
+{chr(10).join([f"{idx + 1}. {comment}" for idx, comment in enumerate(comments_text)])}
+
+{'='*80}
+AI-GENERATED SUMMARY
+{'='*80}
+
+{summary}
+
+{'='*80}
+END OF SUMMARY
+{'='*80}
+"""
+                    st.download_button(
+                        label="📄 Download DOC",
+                        data=doc_content,
+                        file_name=f"{base_filename}.doc",
+                        mime="application/msword",
+                        use_container_width=True,
+                        type="secondary"
+                    )
+                
+                with col4:
+                    # CSV format
+                    csv_output = io.StringIO()
+                    csv_writer = csv.writer(csv_output)
+                    
+                    # Write header
+                    csv_writer.writerow(["Field", "Value"])
+                    csv_writer.writerow(["Locale", selected_locale])
+                    csv_writer.writerow(["Generated", timestamp])
+                    csv_writer.writerow(["Comment Count", comment_count])
+                    csv_writer.writerow(["Model Used", "gpt-4o"])
+                    csv_writer.writerow([])  # Empty row
+                    csv_writer.writerow(["Summary"])
+                    csv_writer.writerow([summary])
+                    csv_writer.writerow([])  # Empty row
+                    csv_writer.writerow(["Comment #", "Comment"])
+                    
+                    # Write comments
+                    for idx, comment in enumerate(comments_text, 1):
+                        csv_writer.writerow([idx, comment])
+                    
+                    csv_content = csv_output.getvalue()
+                    csv_output.close()
+                    
+                    st.download_button(
+                        label="📊 Download CSV",
+                        data=csv_content,
+                        file_name=f"{base_filename}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        type="secondary"
+                    )
 
 def display_blind_test_2_setup(configured_providers: List[str]):
     """Display the blind test 2 setup page"""

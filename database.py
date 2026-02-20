@@ -115,6 +115,19 @@ class BenchmarkDatabase:
             )
         ''')
         
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS locale_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                locale TEXT,
+                summary TEXT,
+                comment_count INTEGER,
+                model_used TEXT,
+                created_at DATETIME,
+                updated_at DATETIME,
+                UNIQUE(locale)
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -501,6 +514,68 @@ class BenchmarkDatabase:
         
         conn.close()
         return votes
+    
+    def save_locale_summary(self, locale: str, summary: str, comment_count: int, model_used: str = "gpt-4o"):
+        """Save or update a summary for a locale"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        now = datetime.now().isoformat()
+        
+        # Check if summary exists for this locale
+        cursor.execute('SELECT id FROM locale_summaries WHERE locale = ?', (locale,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing summary
+            cursor.execute('''
+                UPDATE locale_summaries 
+                SET summary = ?, comment_count = ?, model_used = ?, updated_at = ?
+                WHERE locale = ?
+            ''', (summary, comment_count, model_used, now, locale))
+        else:
+            # Insert new summary
+            cursor.execute('''
+                INSERT INTO locale_summaries (locale, summary, comment_count, model_used, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (locale, summary, comment_count, model_used, now, now))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_locale_summary(self, locale: str) -> Optional[Dict[str, Any]]:
+        """Get the stored summary for a locale"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT locale, summary, comment_count, model_used, created_at, updated_at
+            FROM locale_summaries
+            WHERE locale = ?
+        ''', (locale,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return {
+                "locale": result[0],
+                "summary": result[1],
+                "comment_count": result[2],
+                "model_used": result[3],
+                "created_at": result[4],
+                "updated_at": result[5]
+            }
+        return None
+    
+    def delete_locale_summary(self, locale: str):
+        """Delete a stored summary for a locale (to force regeneration)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM locale_summaries WHERE locale = ?', (locale,))
+        conn.commit()
+        conn.close()
     
     def get_latency_stats_by_provider(self) -> Dict[str, Dict]:
         """Get latency statistics including P95 for each provider"""
